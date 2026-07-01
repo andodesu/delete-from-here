@@ -1,12 +1,13 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Debug with extended logging.');
+    console.log('🚀 Delete After Here: Robust one-shot observer.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
     }
 
+    // --- Deletion logic (unchanged) ---
     async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
@@ -73,11 +74,9 @@
         }
     }
 
+    // --- Inject scissor (with your custom styling) ---
     function injectScissor(container, messageId) {
-        if (!container) {
-            console.warn('❌ injectScissor: container is null');
-            return;
-        }
+        if (!container) return;
         const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -106,7 +105,6 @@
         });
 
         container.appendChild(item);
-        console.log(`✅ Scissor injected for message ${messageId}`);
     }
 
     function getMessageId(el) {
@@ -117,93 +115,108 @@
         return el.id || null;
     }
 
+    // --- Event delegation with one-shot observer ---
     function setupDelegation() {
         const container = document.querySelector('#chat');
-        if (!container) {
-            console.warn('❌ #chat not found');
-            return false;
-        }
-        if (container.dataset.deleteAfterHereDelegated) {
-            console.log('ℹ️ Delegation already set up');
-            return true;
-        }
+        if (!container) return false;
+        if (container.dataset.deleteAfterHereDelegated) return true;
         container.dataset.deleteAfterHereDelegated = 'true';
 
         container.addEventListener('click', function(e) {
             const toggle = e.target.closest('.mes_button.extraMesButtonsHint');
             if (!toggle) return;
-            console.log('🔍 Toggle clicked!');
 
             const mes = toggle.closest('.mes');
-            if (!mes) {
-                console.warn('❌ No .mes parent found');
-                return;
-            }
+            if (!mes) return;
             const id = getMessageId(mes);
-            if (!id) {
-                console.warn('❌ No message ID found');
-                return;
-            }
-            console.log(`🔍 Message ID: ${id}`);
-
+            if (!id) return;
             const menu = mes.querySelector('.extraMesButtons');
-            if (!menu) {
-                console.warn('❌ .extraMesButtons not found in .mes');
-                return;
-            }
-            console.log('🔍 .extraMesButtons found, waiting 300ms...');
+            if (!menu) return;
 
-            setTimeout(() => {
-                // Detailed visibility check
-                const styleDisplay = menu.style.display || 'not set';
-                const hasHidden = menu.hasAttribute('hidden');
-                const offsetParent = menu.offsetParent;
-                const parentDropdown = menu.closest('.dropdown');
-                const parentClasses = parentDropdown ? parentDropdown.className : 'no dropdown parent';
-
-                console.log('📊 Visibility details:');
-                console.log('  - style.display:', styleDisplay);
-                console.log('  - hasAttribute("hidden"):', hasHidden);
-                console.log('  - offsetParent:', offsetParent);
-                console.log('  - parent .dropdown classes:', parentClasses);
-                console.log('  - menu itself classes:', menu.className);
-
-                const isVisible = offsetParent !== null && !hasHidden && styleDisplay !== 'none';
-                console.log(`🔍 Menu visible? ${isVisible}`);
-
+            // --- One-shot observer for visibility ---
+            let observer = new MutationObserver(() => {
+                const isVisible = (
+                    menu.offsetParent !== null &&
+                    menu.style.display !== 'none' &&
+                    !menu.hasAttribute('hidden')
+                );
                 if (isVisible) {
                     injectScissor(menu, id);
-                } else {
-                    console.warn('⚠️ Menu not visible, skipping injection');
+                    observer.disconnect();
+                    if (dropdownObserver) dropdownObserver.disconnect();
                 }
-            }, 150);
+            });
+
+            // Observe menu attributes
+            observer.observe(menu, {
+                attributes: true,
+                attributeFilter: ['style', 'hidden', 'class'],
+                attributeOldValue: false
+            });
+
+            // Also observe parent dropdown class changes
+            let dropdownObserver = null;
+            const dropdown = menu.closest('.dropdown');
+            if (dropdown) {
+                dropdownObserver = new MutationObserver(() => {
+                    const isVisible = (
+                        menu.offsetParent !== null &&
+                        menu.style.display !== 'none' &&
+                        !menu.hasAttribute('hidden')
+                    );
+                    if (isVisible) {
+                        injectScissor(menu, id);
+                        observer.disconnect();
+                        dropdownObserver.disconnect();
+                    }
+                });
+                dropdownObserver.observe(dropdown, {
+                    attributes: true,
+                    attributeFilter: ['class'],
+                    attributeOldValue: false
+                });
+            }
+
+            // Check if already visible (edge case)
+            if (menu.offsetParent !== null && menu.style.display !== 'none' && !menu.hasAttribute('hidden')) {
+                injectScissor(menu, id);
+                observer.disconnect();
+                if (dropdownObserver) dropdownObserver.disconnect();
+            }
+
+            // Safety cleanup after 5s (prevents leaks)
+            setTimeout(() => {
+                if (observer) observer.disconnect();
+                if (dropdownObserver) dropdownObserver.disconnect();
+            }, 5000);
         });
 
-        console.log('✅ Event delegation set up');
         return true;
     }
 
+    // --- Scan existing open menus on load ---
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
-        console.log('🔍 Scanning for already-open menus...');
 
         container.querySelectorAll('.extraMesButtons').forEach(menu => {
-            const isVisible = menu.offsetParent !== null;
+            const isVisible = (
+                menu.offsetParent !== null &&
+                menu.style.display !== 'none' &&
+                !menu.hasAttribute('hidden')
+            );
             if (isVisible) {
                 const mes = menu.closest('.mes');
                 if (mes) {
                     const id = getMessageId(mes);
-                    if (id) {
-                        console.log(`🔍 Found visible menu for message ${id}, injecting...`);
-                        injectScissor(menu, id);
-                    }
+                    if (id) injectScissor(menu, id);
                 }
             }
         });
         return true;
     }
 
+    // --- Initialisation ---
     let attempts = 0, interval;
     function init() {
         if (interval) clearInterval(interval);
