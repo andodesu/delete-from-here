@@ -1,13 +1,31 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Robust one-shot observer.');
+    console.log('🚀 Delete After Here: Loaded.');
 
+    // --- Helpers ---
     function getContext() {
-        return window.SillyTavern ? SillyTavern.getContext() : null;
+        return window.SillyTavern?.getContext() || null;
     }
 
-    // --- Deletion logic (unchanged) ---
+    function getMessageId(el) {
+        return el.getAttribute('mesid')
+            || el.dataset.messageId
+            || el.dataset.id
+            || el.id
+            || null;
+    }
+
+    /** Check if a menu element is currently visible */
+    function isMenuVisible(menu) {
+        return (
+            menu.offsetParent !== null &&
+            menu.style.display !== 'none' &&
+            !menu.hasAttribute('hidden')
+        );
+    }
+
+    // --- Core deletion logic (uses native deleteMessage) ---
     async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
@@ -35,17 +53,20 @@
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
+        // Collect all mesid ≥ current from DOM (reliable)
         const currentIdNum = parseInt(messageId);
         const allMes = document.querySelectorAll('.mes');
         const idsToDelete = [];
-        allMes.forEach(mes => {
-            const mesIdAttr = mes.getAttribute('mesid');
-            if (mesIdAttr !== null) {
-                const idNum = parseInt(mesIdAttr);
-                if (!isNaN(idNum) && idNum >= currentIdNum) idsToDelete.push(idNum);
+        for (const mes of allMes) {
+            const mesId = mes.getAttribute('mesid');
+            if (mesId !== null) {
+                const idNum = parseInt(mesId);
+                if (!isNaN(idNum) && idNum >= currentIdNum) {
+                    idsToDelete.push(idNum);
+                }
             }
-        });
-        idsToDelete.sort((a, b) => b - a);
+        }
+        idsToDelete.sort((a, b) => b - a); // reverse order
 
         if (typeof context.deleteMessage !== 'function') {
             console.error('❌ context.deleteMessage is not a function!');
@@ -62,21 +83,24 @@
             }
         }
 
+        // Refresh UI
         const refresh = () => {
             if (typeof context.refreshMessages === 'function') context.refreshMessages();
             else if (typeof context.loadChat === 'function') context.loadChat();
         };
         refresh();
-        setTimeout(refresh, 150);
+        setTimeout(refresh, 150); // extra safety
 
         if (typeof context.toast === 'function') {
             context.toast(`Deleted ${deleted} messages.`, 'info');
         }
     }
 
-    // --- Inject scissor (with your custom styling) ---
+    // --- Inject scissor icon into .extraMesButtons ---
     function injectScissor(container, messageId) {
         if (!container) return;
+
+        // Remove any existing scissor to avoid duplicates
         const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -97,6 +121,7 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
+            // Close the menu by clicking the three‑dots toggle
             const mes = container.closest('.mes');
             if (mes) {
                 const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
@@ -107,18 +132,76 @@
         container.appendChild(item);
     }
 
-    function getMessageId(el) {
-        const id = el.getAttribute('mesid');
-        if (id !== null) return id;
-        if (el.dataset.messageId) return el.dataset.messageId;
-        if (el.dataset.id) return el.dataset.id;
-        return el.id || null;
+    // --- Set up a one‑shot observer that reacts when the menu becomes visible ---
+    function waitForMenuAndInject(menu, messageId) {
+        // Cleanup function to disconnect both observers
+        let observers = [];
+
+        const cleanup = () => {
+            for (const obs of observers) {
+                if (obs) obs.disconnect();
+            }
+            observers = [];
+        };
+
+        // Check visibility and inject if visible
+        const checkAndInject = () => {
+            if (isMenuVisible(menu)) {
+                injectScissor(menu, messageId);
+                cleanup();
+                return true;
+            }
+            return false;
+        };
+
+        // If already visible, inject immediately
+        if (checkAndInject()) return;
+
+        // Observer for changes on the menu itself (style, hidden, class)
+        const menuObserver = new MutationObserver(() => {
+            if (checkAndInject()) {
+                menuObserver.disconnect();
+                // also disconnect dropdown observer if it exists
+                if (dropdownObserver) dropdownObserver.disconnect();
+            }
+        });
+        menuObserver.observe(menu, {
+            attributes: true,
+            attributeFilter: ['style', 'hidden', 'class'],
+        });
+        observers.push(menuObserver);
+
+        // Also observe the parent .dropdown for class changes (if present)
+        const dropdown = menu.closest('.dropdown');
+        let dropdownObserver = null;
+        if (dropdown) {
+            dropdownObserver = new MutationObserver(() => {
+                if (checkAndInject()) {
+                    dropdownObserver.disconnect();
+                    menuObserver.disconnect();
+                }
+            });
+            dropdownObserver.observe(dropdown, {
+                attributes: true,
+                attributeFilter: ['class'],
+            });
+            observers.push(dropdownObserver);
+        }
+
+        // Safety cleanup after 5 seconds (prevents memory leaks)
+        setTimeout(() => {
+            for (const obs of observers) {
+                if (obs) obs.disconnect();
+            }
+            observers = [];
+        }, 5000);
     }
 
-    // --- Event delegation with one-shot observer ---
+    // --- Event delegation: single click listener on #chat ---
     function setupDelegation() {
         const container = document.querySelector('#chat');
         if (!container) return false;
+
         if (container.dataset.deleteAfterHereDelegated) return true;
         container.dataset.deleteAfterHereDelegated = 'true';
 
@@ -133,91 +216,34 @@
             const menu = mes.querySelector('.extraMesButtons');
             if (!menu) return;
 
-            // --- One-shot observer for visibility ---
-            let observer = new MutationObserver(() => {
-                const isVisible = (
-                    menu.offsetParent !== null &&
-                    menu.style.display !== 'none' &&
-                    !menu.hasAttribute('hidden')
-                );
-                if (isVisible) {
-                    injectScissor(menu, id);
-                    observer.disconnect();
-                    if (dropdownObserver) dropdownObserver.disconnect();
-                }
-            });
-
-            // Observe menu attributes
-            observer.observe(menu, {
-                attributes: true,
-                attributeFilter: ['style', 'hidden', 'class'],
-                attributeOldValue: false
-            });
-
-            // Also observe parent dropdown class changes
-            let dropdownObserver = null;
-            const dropdown = menu.closest('.dropdown');
-            if (dropdown) {
-                dropdownObserver = new MutationObserver(() => {
-                    const isVisible = (
-                        menu.offsetParent !== null &&
-                        menu.style.display !== 'none' &&
-                        !menu.hasAttribute('hidden')
-                    );
-                    if (isVisible) {
-                        injectScissor(menu, id);
-                        observer.disconnect();
-                        dropdownObserver.disconnect();
-                    }
-                });
-                dropdownObserver.observe(dropdown, {
-                    attributes: true,
-                    attributeFilter: ['class'],
-                    attributeOldValue: false
-                });
-            }
-
-            // Check if already visible (edge case)
-            if (menu.offsetParent !== null && menu.style.display !== 'none' && !menu.hasAttribute('hidden')) {
-                injectScissor(menu, id);
-                observer.disconnect();
-                if (dropdownObserver) dropdownObserver.disconnect();
-            }
-
-            // Safety cleanup after 5s (prevents leaks)
-            setTimeout(() => {
-                if (observer) observer.disconnect();
-                if (dropdownObserver) dropdownObserver.disconnect();
-            }, 5000);
+            waitForMenuAndInject(menu, id);
         });
 
         return true;
     }
 
-    // --- Scan existing open menus on load ---
+    // --- Check for any already‑open menus on page load ---
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
 
-        container.querySelectorAll('.extraMesButtons').forEach(menu => {
-            const isVisible = (
-                menu.offsetParent !== null &&
-                menu.style.display !== 'none' &&
-                !menu.hasAttribute('hidden')
-            );
-            if (isVisible) {
+        const menus = container.querySelectorAll('.extraMesButtons');
+        for (const menu of menus) {
+            if (isMenuVisible(menu)) {
                 const mes = menu.closest('.mes');
                 if (mes) {
                     const id = getMessageId(mes);
                     if (id) injectScissor(menu, id);
                 }
             }
-        });
+        }
         return true;
     }
 
-    // --- Initialisation ---
-    let attempts = 0, interval;
+    // --- Initialisation with retry ---
+    let attempts = 0;
+    let interval = null;
+
     function init() {
         if (interval) clearInterval(interval);
         interval = setInterval(() => {
@@ -235,10 +261,13 @@
         }, 1000);
     }
 
+    // --- Start when DOM is ready ---
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
         document.addEventListener('DOMContentLoaded', init);
     }
-    document.addEventListener('SillyTavernReady', () => setTimeout(init, 500));
+    document.addEventListener('SillyTavernReady', () => {
+        setTimeout(init, 500);
+    });
 })();
