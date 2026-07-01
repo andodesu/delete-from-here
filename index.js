@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Clean DOM injection with event cleanup.');
+    console.log('🚀 Delete After Here: Clean version.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -48,8 +48,6 @@
         });
         idsToDelete.sort((a, b) => b - a);
 
-        console.log(`📤 Will delete ${idsToDelete.length} messages with mesid:`, idsToDelete);
-
         if (typeof context.deleteMessage !== 'function') {
             console.error('❌ context.deleteMessage is not a function!');
             return;
@@ -58,15 +56,12 @@
         let deleted = 0;
         for (const mesId of idsToDelete) {
             try {
-                console.log(`🗑️ Deleting message with mesid ${mesId}`);
                 await context.deleteMessage(mesId);
                 deleted++;
             } catch (e) {
                 console.error(`❌ Error deleting message ${mesId}:`, e);
             }
         }
-
-        console.log(`✅ Deleted ${deleted} messages using native deleteMessage.`);
 
         const refresh = () => {
             if (typeof context.refreshMessages === 'function') context.refreshMessages();
@@ -80,10 +75,10 @@
         }
     }
 
-    // --- Clean button injection with show/hide events ---
     function addDeleteOptionToMenu(menu, messageId) {
-        if (!menu) return false;
-        // Remove any existing item first (avoids duplicates)
+        if (!menu) return;
+
+        // Remove existing to avoid duplicates
         const existing = menu.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -111,8 +106,6 @@
         });
 
         menu.appendChild(item);
-        console.log(`✅ Option added for message ${messageId}`);
-        return true;
     }
 
     function getMessageId(el) {
@@ -120,54 +113,27 @@
         if (id !== null) return id;
         if (el.dataset.messageId) return el.dataset.messageId;
         if (el.dataset.id) return el.dataset.id;
-        if (el.id) return el.id;
-        return null;
+        return el.id || null;
     }
 
     function processMessage(el) {
         const id = getMessageId(el);
         if (!id) return;
 
-        let toggle = el.querySelector('.mes_button.extraMesButtonsHint');
-        if (!toggle) toggle = el.querySelector('[data-toggle="dropdown"]');
-        if (!toggle) toggle = el.querySelector('.dropdown-toggle');
+        const toggle = el.querySelector('.mes_button.extraMesButtonsHint');
         if (!toggle) return;
 
         if (toggle.dataset.deleteAfterHereHook === 'true') return;
         toggle.dataset.deleteAfterHereHook = 'true';
 
-        const dropdown = toggle.closest('.dropdown');
-        if (!dropdown) {
-            console.warn(`⚠️ No .dropdown parent for message ${id}`);
-            return;
-        }
-
-        // Add item when dropdown opens
-        dropdown.addEventListener('shown.bs.dropdown', function() {
-            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                addDeleteOptionToMenu(menu, id);
-            }
+        toggle.addEventListener('click', function() {
+            setTimeout(() => {
+                const menu = el.querySelector('.mes_buttons');
+                if (menu) {
+                    addDeleteOptionToMenu(menu, id);
+                }
+            }, 200);
         });
-
-        // Remove item when dropdown closes
-        dropdown.addEventListener('hidden.bs.dropdown', function() {
-            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                const item = menu.querySelector('.delete-after-here-item');
-                if (item) item.remove();
-            }
-        });
-
-        // If dropdown is already open (rare), add immediately
-        if (dropdown.classList.contains('show')) {
-            const menu = dropdown.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                addDeleteOptionToMenu(menu, id);
-            }
-        }
-
-        console.log(`✅ Toggle hooked for message ${id}`);
     }
 
     function scan() {
@@ -177,7 +143,6 @@
         const msgs = container.querySelectorAll('.mes');
         if (!msgs.length) return false;
 
-        console.log(`✅ Found ${msgs.length} messages.`);
         msgs.forEach(processMessage);
 
         new MutationObserver(() => {
@@ -198,11 +163,11 @@
             if (scan()) {
                 clearInterval(interval);
                 interval = null;
-                console.log('✅ Extension ready.');
+                console.log('✅ Delete After Here ready.');
             } else if (attempts >= 30) {
                 clearInterval(interval);
                 interval = null;
-                console.error('❌ Failed to initialise after 30 attempts.');
+                console.error('❌ Failed to initialise.');
             }
         }, 1000);
     }
