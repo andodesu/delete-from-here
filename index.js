@@ -91,9 +91,9 @@
 
         const icon = document.createElement('i');
         icon.className = 'fa-solid fa-scissors fa-fw';
-        icon.style.fontSize = '0.9em';
+        icon.style.fontSize = '0.95em';
         // Nudge the icon up to align with other icons
-        icon.style.transform = 'translateY(-5px)';
+        icon.style.transform = 'translateY(-4px)';
         icon.style.display = 'inline-block';
         item.appendChild(icon);
 
