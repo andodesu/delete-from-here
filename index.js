@@ -21,7 +21,6 @@
             return;
         }
 
-        // Find index from messageId
         let index = chat.findIndex(msg => String(msg.id) === String(messageId));
         if (index === -1) {
             const idx = parseInt(messageId);
@@ -35,7 +34,6 @@
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
-        // Collect mesid from DOM (reliable, matches native)
         const currentIdNum = parseInt(messageId);
         const allMes = document.querySelectorAll('.mes');
         const idsToDelete = [];
@@ -48,7 +46,7 @@
                 }
             }
         });
-        idsToDelete.sort((a, b) => b - a); // reverse order
+        idsToDelete.sort((a, b) => b - a);
 
         console.log(`📤 Will delete ${idsToDelete.length} messages with mesid:`, idsToDelete);
 
@@ -70,7 +68,6 @@
 
         console.log(`✅ Deleted ${deleted} messages using native deleteMessage.`);
 
-        // Force UI refresh
         const refresh = () => {
             if (typeof context.refreshMessages === 'function') context.refreshMessages();
             else if (typeof context.loadChat === 'function') context.loadChat();
@@ -83,14 +80,20 @@
         }
     }
 
-    // ----- Menu injection (unchanged) -----
+    // --- Updated: scissor icon instead of text ---
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu || menu.querySelector('.delete-after-here-item')) return false;
 
         const item = document.createElement('div');
         item.className = 'delete-after-here-item mes_button';
         item.style.cursor = 'pointer';
-        item.textContent = '🗑️ Delete all after';
+        item.title = 'Delete all after this message';
+
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-scissors';
+        icon.style.fontSize = '1.1em';
+        item.appendChild(icon);
+
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
@@ -100,11 +103,13 @@
                 if (toggleBtn) toggleBtn.click();
             }
         });
+
         menu.appendChild(item);
         console.log(`✅ Option added for message ${messageId}`);
         return true;
     }
 
+    // --- Rest of the extension unchanged ---
     function getMessageId(el) {
         const id = el.getAttribute('mesid');
         if (id !== null) return id;
