@@ -1,145 +1,111 @@
-// index.js for DeleteFromHere-Menu extension
+console.log("[DeleteFromHere] loaded");
 
-const extensionName = "DeleteFromHere-Menu";
+/**
+ * Delete from a given message onward
+ * (uses SillyTavern's own UI delete flow as fallback-safe method)
+ */
+function deleteFromHere(index) {
+    if (!confirm("Delete this message and all following messages?")) return;
 
-// Wait for SillyTavern to be fully loaded
-(async () => {
-    // Load required modules
-    const { saveChatConditional } = await import("../../../../../script.js");
-    const { event_types, eventSource } = await import("../../../../../script.js");
-    const { getContext } = await import("../../../../extensions.js");
+    const mes =
+        document.querySelector(`.mes[data-messageid="${index}"]`) ||
+        document.querySelector(`.mes[message_id="${index}"]`);
 
-    /**
-     * Delete messages from given index to end of chat
-     */
-    async function deleteFromHere(messageId) {
-        const context = getContext();
-        const chat = context.chat;
-        
-        if (!chat || !Array.isArray(chat) || chat.length === 0) {
-            toastr.warning('No messages to delete');
-            return;
-        }
-
-        // Find message index by ID
-        const messageIndex = chat.findIndex(m => String(m.mesid) === String(messageId));
-        
-        if (messageIndex === -1) {
-            toastr.error('Message not found in chat');
-            return;
-        }
-
-        const deletedCount = chat.length - messageIndex;
-        const messagePreview = chat[messageIndex]?.mes?.substring(0, 100) || '[message]';
-        
-        // Confirmation dialog
-        const confirmMessage = `Delete from this message onward?\n\n` +
-            `"${messagePreview}${chat[messageIndex]?.mes?.length > 100 ? '...' : ''}"\n\n` +
-            `This will remove ${deletedCount} message(s) total.\n` +
-            `This action cannot be undone.`;
-
-        if (!confirm(confirmMessage)) {
-            return;
-        }
-
-        // Perform deletion
-        chat.splice(messageIndex, deletedCount);
-        
-        // Save the chat
-        await saveChatConditional();
-        
-        // Show notification
-        toastr.success(`Deleted ${deletedCount} message(s)`);
-        
-        // Refresh UI
-        eventSource.emit(event_types.CHAT_CHANGED);
+    if (!mes) {
+        console.error("[DFH] message not found for index:", index);
+        return;
     }
 
-    /**
-     * Add delete button to message action menus
-     */
-    function addDeleteButton() {
-        // Add CSS for the button
-        if (!document.getElementById('deleteFromHereStyles')) {
-            const style = document.createElement('style');
-            style.id = 'deleteFromHereStyles';
-            style.textContent = `
-                .delete_from_here_menu_item {
-                    color: #ff6b6b !important;
-                }
-                .delete_from_here_menu_item:hover {
-                    background: rgba(255, 107, 107, 0.15) !important;
-                }
-            `;
-            document.head.appendChild(style);
-        }
+    // Try to find ST's built-in delete button and click it
+    const candidates = mes.querySelectorAll("button, .mes_button, div");
 
-        // Find all message action menus and add button
-        $('.mes_buttons, .mes-edit-buttons').each(function() {
-            const buttonContainer = $(this);
-            
-            // Skip if already added
-            if (buttonContainer.find('.deleteFromHereBtn').length > 0) {
+    for (const el of candidates) {
+        const title = (el.getAttribute("title") || "").toLowerCase();
+        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+
+        if (title.includes("delete") || aria.includes("delete")) {
+            el.click();
+            console.log("[DFH] triggered native delete");
+            return;
+        }
+    }
+
+    console.error("[DFH] could not find native delete button in message UI");
+}
+
+/**
+ * Inject button into message UI
+ */
+function injectButton(mes) {
+    try {
+        if (!mes || mes.dataset.dfhAttached === "1") return;
+
+        const buttons = mes.querySelector(".mes_buttons");
+        if (!buttons) return;
+
+        const btn = document.createElement("div");
+        btn.className = "mes_button dfh-btn";
+        btn.title = "Delete from here";
+        btn.textContent = "✂️";
+
+        btn.onclick = (e) => {
+            e.stopPropagation();
+
+            const id =
+                mes.dataset.messageid ||
+                mes.getAttribute("message_id");
+
+            if (id == null) {
+                console.error("[DFH] missing message id on element");
                 return;
             }
-            
-            // Get message block and ID
-            const messageBlock = buttonContainer.closest('.mes');
-            if (!messageBlock.length) return;
-            
-            const messageId = messageBlock.attr('mesid');
-            if (!messageId) return;
-            
-            // Create the button
-            const deleteBtn = $(`
-                <div class="deleteFromHereBtn interactable delete_from_here_menu_item" 
-                     title="Delete this and all subsequent messages" 
-                     data-mesid="${messageId}">
-                    <i class="fa-solid fa-scissors"></i>
-                    Delete from here
-                </div>
-            `);
-            
-            // Add click handler
-            deleteBtn.on('click', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                deleteFromHere($(this).data('mesid'));
-            });
-            
-            // Add to container
-            buttonContainer.append(deleteBtn);
-        });
+
+            deleteFromHere(id);
+        };
+
+        buttons.appendChild(btn);
+
+        mes.dataset.dfhAttached = "1";
+    } catch (err) {
+        console.error("[DFH inject error]", err);
+    }
+}
+
+/**
+ * Scan all messages once per render cycle
+ */
+function scan() {
+    try {
+        document.querySelectorAll(".mes").forEach(injectButton);
+    } catch (e) {
+        console.error("[DFH scan error]", e);
+    }
+}
+
+/**
+ * Hook into ST events if they exist (safe optional usage)
+ */
+function hookEvents() {
+    const ctx = window.SillyTavernContext || window.getContext?.();
+
+    const es = ctx?.eventSource || window.eventSource;
+    const et = ctx?.event_types || window.event_types;
+
+    if (es && et) {
+        es.on(et.CHAT_CHANGED, scan);
+        es.on(et.MESSAGE_RENDERED, scan);
+        console.log("[DFH] hooked into ST events");
+        return;
     }
 
-    // Initialize extension
-    function init() {
-        // Initial button addition
-        setTimeout(addDeleteButton, 1000);
-        
-        // Listen for chat changes
-        eventSource.on(event_types.CHAT_CHANGED, () => {
-            setTimeout(addDeleteButton, 200);
-        });
-        
-        // Listen for new messages
-        eventSource.on(event_types.MESSAGE_RECEIVED, () => {
-            setTimeout(addDeleteButton, 200);
-        });
-        
-        // Listen for message edits
-        eventSource.on(event_types.MESSAGE_UPDATED, () => {
-            setTimeout(addDeleteButton, 200);
-        });
-        
-        // Listen for message swipes
-        eventSource.on(event_types.MESSAGE_SWIPED, () => {
-            setTimeout(addDeleteButton, 200);
-        });
-        
-        console.log(`${extensionName}: Extension loaded successfully`);
-    }
+    console.log("[DFH] using fallback scan loop");
+    setInterval(scan, 1500);
+}
 
-    // Start the extension
-    init();
-})();
+/**
+ * Init
+ */
+setTimeout(scan, 500);
+hookEvents();
+
+console.log("[DeleteFromHere] ready");
