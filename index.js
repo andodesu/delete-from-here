@@ -6,47 +6,31 @@ function getContext() {
         || null;
 }
 
-function deleteFromHere(messageId) {
+function deleteFromHere(index) {
     if (!confirm("Delete this message and all following messages?")) return;
 
-    const index = Number(messageId);
+    const i = Number(index);
+    if (Number.isNaN(i)) return;
 
-    if (Number.isNaN(index)) {
-        console.error("[DFH] bad index:", messageId);
+    // Get the message element
+    const mes = document.querySelector(`.mes[message_id="${i}"], .mes[data-messageid="${i}"]`);
+
+    if (!mes) {
+        console.error("[DFH] message element not found for index:", i);
         return;
     }
 
-    const context = window.SillyTavernContext || window.getContext?.();
-    const chat = context?.chat || window.chat;
+    // Find ST's own delete button and click it (reuses internal logic)
+    const deleteBtn =
+        mes.querySelector('[title*="Delete"]') ||
+        mes.querySelector('.mes_button[title*="delete"]');
 
-    if (!Array.isArray(chat)) {
-        console.error("[DFH] chat not found");
+    if (deleteBtn) {
+        deleteBtn.click();
         return;
     }
 
-    console.log("[DFH] deleting from:", index);
-
-    // 🔥 core action
-    chat.splice(index);
-
-    // 🔥 force ST to rebuild state
-    try { context?.saveChat?.(); } catch {}
-    try { window.saveChat?.(); } catch {}
-
-    // 🔥 THIS is the missing piece in your versions
-    try {
-        context?.eventSource?.emit?.(context?.event_types?.CHAT_CHANGED);
-    } catch {}
-
-    try {
-        window.eventSource?.emit?.("chat_changed");
-    } catch {}
-
-    // 🔥 hard fallback refresh (this is what actually makes it visible)
-    setTimeout(() => {
-        try { context?.reloadCurrentChat?.(); } catch {}
-        try { window.reloadCurrentChat?.(); } catch {}
-    }, 50);
+    console.error("[DFH] Could not find native delete button");
 }
 
 /**
