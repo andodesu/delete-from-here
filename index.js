@@ -1,36 +1,70 @@
-module.exports = {
-    async init(context) {
-        // Register a new action in the message dropdown
+(function() {
+    'use strict';
+
+    function init() {
+        // Get the Silly Tavern runtime context
+        const context = SillyTavern.getContext();
+
+        // Register a new message action
         context.messageActions.push({
-            // Unique identifier for this action
             id: 'delete-after-here',
-            // Label shown on hover
             label: 'Delete all after this message',
-            // Font Awesome icon (optional)
             icon: 'fa-trash-can',
-            // The function called when the action is clicked
             action: (messageId) => {
-                // Get the current chat array
-                const chat = context.chat;
-                // Find the index of the clicked message by its ID
+                // 1. Get the current chat array
+                let chat = context.chat;
+                if (!chat && typeof context.getChat === 'function') {
+                    chat = context.getChat();
+                }
+                if (!chat) {
+                    console.warn('Delete After Here: chat not available');
+                    return;
+                }
+
+                // 2. Find the index of the clicked message
                 const index = chat.findIndex(msg => msg.id === messageId);
                 if (index === -1) {
                     console.warn('Delete After Here: message not found');
                     return;
                 }
 
-                // Remove this message and everything after it
+                // 3. Optional confirmation (remove if you don't want it)
+                const count = chat.length - index - 1;
+                if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) {
+                    return;
+                }
+
+                // 4. Delete this message and everything after it
                 chat.splice(index);
 
-                // Save the updated chat
-                context.saveChat();
+                // 5. Save the updated chat
+                if (typeof context.saveChat === 'function') {
+                    context.saveChat();
+                } else if (typeof context.setChat === 'function') {
+                    context.setChat(chat);
+                }
 
-                // Refresh the message display
-                context.refreshMessages();
+                // 6. Refresh the UI
+                if (typeof context.refreshMessages === 'function') {
+                    context.refreshMessages();
+                } else if (typeof context.loadChat === 'function') {
+                    context.loadChat();
+                }
 
-                // Optional: show a quick confirmation toast
-                context.toast('Deleted message and all following messages.', 'info');
+                // 7. Show a toast notification
+                if (typeof context.toast === 'function') {
+                    context.toast('Deleted message and all following messages.', 'info');
+                }
             }
         });
+
+        console.log('✅ Delete After Here extension loaded.');
     }
-};
+
+    // Wait for SillyTavern to be fully ready
+    if (window.SillyTavern) {
+        init();
+    } else {
+        document.addEventListener('SillyTavernReady', init);
+    }
+})();
