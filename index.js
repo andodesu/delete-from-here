@@ -68,7 +68,12 @@
         }
 
         const count = chat.length - index - 1;
-        const msg = `Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`;
+        let msg;
+        if (count === 0) {
+            msg = 'Are you sure you want to delete this message?';
+        } else {
+            msg = `Are you sure you want to delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`;
+        }
         if (!(await confirmWithModal(msg))) return;
 
         // Collect all mesid ≥ current from DOM
