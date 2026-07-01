@@ -1,32 +1,34 @@
 (function() {
     'use strict';
 
-    // --- Helper: get ST context ---
+    console.log('🚀 Delete After Here: Script loaded.');
+
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
     }
 
-    // --- Deletion logic (same as before) ---
     function deleteAfter(messageId) {
         const context = getContext();
-        if (!context) return;
+        if (!context) {
+            console.error('❌ Delete After Here: Context not found.');
+            return;
+        }
 
-        let chat = context.chat || (typeof context.getChat === 'function' ? context.getChat() : null);
+        let chat = context.chat;
+        if (!chat && typeof context.getChat === 'function') chat = context.getChat();
         if (!chat) {
-            console.warn('Delete After Here: chat not available');
+            console.error('❌ Delete After Here: Chat array not found.');
             return;
         }
 
         const index = chat.findIndex(msg => msg.id === messageId);
         if (index === -1) {
-            console.warn('Delete After Here: message not found');
+            console.error(`❌ Delete After Here: Message ID ${messageId} not found.`);
             return;
         }
 
         const count = chat.length - index - 1;
-        if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) {
-            return;
-        }
+        if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
         chat.splice(index);
 
@@ -36,113 +38,152 @@
         if (typeof context.refreshMessages === 'function') context.refreshMessages();
         else if (typeof context.loadChat === 'function') context.loadChat();
 
-        if (typeof context.toast === 'function') {
-            context.toast('Deleted message and all following messages.', 'info');
-        }
+        if (typeof context.toast === 'function') context.toast('Deleted messages.', 'info');
+        console.log('✅ Delete After Here: Deletion complete.');
     }
 
-    // --- Add our option to a dropdown menu ---
-    function addDeleteOptionToDropdown(dropdownMenu, messageId) {
-        // Avoid duplicates
-        if (dropdownMenu.querySelector('.delete-after-here-item')) return;
+    function addDeleteOptionToMenu(menu, messageId) {
+        if (!menu) {
+            console.warn('⚠️ Delete After Here: Menu is null.');
+            return false;
+        }
+        if (menu.querySelector('.delete-after-here-item')) {
+            console.log('ℹ️ Delete After Here: Option already exists.');
+            return false;
+        }
 
-        const listItem = document.createElement('li');
-        listItem.className = 'delete-after-here-item';
-
-        const link = document.createElement('a');
-        link.href = '#';
-        link.textContent = '🗑️ Delete all after this'; // or use text only
-        link.addEventListener('click', (e) => {
+        const li = document.createElement('li');
+        li.className = 'delete-after-here-item';
+        const a = document.createElement('a');
+        a.href = '#';
+        a.textContent = '🗑️ Delete all after this';
+        a.style.cursor = 'pointer';
+        a.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-
             deleteAfter(messageId);
-
-            // Close the dropdown
-            const dropdown = dropdownMenu.closest('.dropdown');
+            const dropdown = menu.closest('.dropdown');
             if (dropdown) {
                 const toggle = dropdown.querySelector('[data-toggle="dropdown"]');
-                if (toggle) toggle.click(); // toggles it off
+                if (toggle) toggle.click();
             }
         });
-
-        listItem.appendChild(link);
-        dropdownMenu.appendChild(listItem);
+        li.appendChild(a);
+        menu.appendChild(li);
+        console.log(`✅ Delete After Here: Option added to menu for message ${messageId}`);
+        return true;
     }
 
-    // --- Process a single message element ---
     function processMessage(messageElement) {
         const messageId = messageElement.dataset.messageId;
-        if (!messageId) return;
-
-        // Find the dropdown toggle (three‑dots button)
-        const toggleBtn = messageElement.querySelector('[data-toggle="dropdown"]');
-        if (!toggleBtn) return;
-
-        const dropdown = toggleBtn.closest('.dropdown');
-        if (!dropdown) return;
-
-        // Prevent attaching multiple listeners to the same dropdown
-        if (dropdown.dataset.deleteAfterHere === 'true') return;
-        dropdown.dataset.deleteAfterHere = 'true';
-
-        // When the dropdown opens, inject our item
-        dropdown.addEventListener('shown.bs.dropdown', function() {
-            const menu = this.querySelector('.dropdown-menu');
-            if (menu) {
-                addDeleteOptionToDropdown(menu, messageId);
-            }
-        });
-
-        // If dropdown is already open (rare), add immediately
-        if (dropdown.classList.contains('show')) {
-            const menu = dropdown.querySelector('.dropdown-menu');
-            if (menu) addDeleteOptionToDropdown(menu, messageId);
-        }
-    }
-
-    // --- Watch the chat container for new messages ---
-    function observeMessages() {
-        const chatContainer = document.getElementById('chat');
-        if (!chatContainer) {
-            console.warn('Delete After Here: chat container not found');
+        if (!messageId) {
+            console.warn('⚠️ Delete After Here: Message has no dataset.messageId.', messageElement);
             return;
         }
 
-        // Process messages already on the page
-        chatContainer.querySelectorAll('.mes').forEach(processMessage);
+        const toggleBtn = messageElement.querySelector('[data-toggle="dropdown"]');
+        if (!toggleBtn) {
+            console.warn(`⚠️ Delete After Here: No [data-toggle="dropdown"] found for message ${messageId}. Checking other selectors...`);
+            // Debug: Log all buttons inside the message
+            const allButtons = messageElement.querySelectorAll('button, a, [role="button"]');
+            console.log('Buttons found:', allButtons);
+            return;
+        }
 
-        // Observe future messages
-        const observer = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                for (const node of mutation.addedNodes) {
-                    if (node.nodeType === Node.ELEMENT_NODE) {
-                        // If the added node is a message itself
-                        if (node.matches && node.matches('.mes')) {
-                            processMessage(node);
-                        }
-                        // Or if it contains messages
-                        if (node.querySelectorAll) {
-                            node.querySelectorAll('.mes').forEach(processMessage);
-                        }
+        const dropdown = toggleBtn.closest('.dropdown');
+        if (!dropdown) {
+            console.warn(`⚠️ Delete After Here: .dropdown parent not found for message ${messageId}`);
+            return;
+        }
+
+        if (dropdown.dataset.deleteAfterHereHook === 'true') {
+            return; // Already hooked
+        }
+        dropdown.dataset.deleteAfterHereHook = 'true';
+
+        toggleBtn.addEventListener('click', function(e) {
+            console.log(`🖱️ Delete After Here: Toggle clicked for message ${messageId}`);
+            setTimeout(() => {
+                const menu = dropdown.querySelector('.dropdown-menu');
+                if (menu && dropdown.classList.contains('show')) {
+                    addDeleteOptionToMenu(menu, messageId);
+                } else {
+                    console.warn('⚠️ Delete After Here: Menu not found or dropdown not open. Menu:', menu, 'Show class:', dropdown.classList.contains('show'));
+                    // Try to find the menu anyway
+                    const anyMenu = dropdown.querySelector('.dropdown-menu');
+                    if (anyMenu) {
+                        console.log('🔍 Found menu anyway, attempting to add option.');
+                        addDeleteOptionToMenu(anyMenu, messageId);
                     }
                 }
-            }
+            }, 100); // Increased delay to ensure menu renders
+        });
+
+        console.log(`✅ Delete After Here: Toggle hooked for message ${messageId}`);
+    }
+
+    function scanAndProcess() {
+        const chatContainer = document.getElementById('chat');
+        if (!chatContainer) {
+            console.warn('❌ Delete After Here: #chat container not found in DOM.');
+            return false;
+        }
+        console.log('✅ Delete After Here: #chat container found.');
+
+        const messages = chatContainer.querySelectorAll('.mes');
+        console.log(`📊 Delete After Here: Found ${messages.length} messages with class '.mes'.`);
+
+        if (messages.length === 0) {
+            // Let's see what IS inside #chat
+            console.log('🔍 Content of #chat:', chatContainer.innerHTML.substring(0, 500) + '...');
+        }
+
+        messages.forEach(processMessage);
+
+        // Watch for new messages
+        const observer = new MutationObserver(() => {
+            chatContainer.querySelectorAll('.mes').forEach(msg => {
+                const toggle = msg.querySelector('[data-toggle="dropdown"]');
+                if (toggle) {
+                    const dropdown = toggle.closest('.dropdown');
+                    if (dropdown && dropdown.dataset.deleteAfterHereHook !== 'true') {
+                        processMessage(msg);
+                    }
+                }
+            });
         });
 
         observer.observe(chatContainer, { childList: true, subtree: true });
-        console.log('✅ Delete After Here: observer started.');
+        console.log('👀 Delete After Here: MutationObserver started.');
+        return true;
     }
 
-    // --- Start when DOM is ready ---
+    // Retry logic
+    let attempts = 0;
+    function init() {
+        attempts++;
+        if (document.getElementById('chat')) {
+            scanAndProcess();
+        } else {
+            if (attempts < 15) {
+                console.log(`⏳ Delete After Here: Waiting for #chat... (attempt ${attempts})`);
+                setTimeout(init, 500);
+            } else {
+                console.error('❌ Delete After Here: #chat never appeared.');
+            }
+        }
+    }
+
+    // Start the script
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
-        observeMessages();
+        init();
     } else {
-        document.addEventListener('DOMContentLoaded', observeMessages);
+        document.addEventListener('DOMContentLoaded', init);
     }
 
-    // Also re-run when ST re-renders the chat (e.g., after navigation)
     document.addEventListener('SillyTavernReady', () => {
-        setTimeout(observeMessages, 300);
+        console.log('🎉 Delete After Here: SillyTavernReady event fired.');
+        setTimeout(init, 300);
     });
+
 })();
