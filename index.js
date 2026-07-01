@@ -6,31 +6,47 @@ function getContext() {
         || null;
 }
 
-function deleteFromHere(index) {
+function deleteFromHere(messageId) {
     if (!confirm("Delete this message and all following messages?")) return;
 
-    const ctx = getContext();
-    const chat = ctx?.chat || window.chat;
+    const index = Number(messageId);
+
+    if (Number.isNaN(index)) {
+        console.error("[DFH] bad index:", messageId);
+        return;
+    }
+
+    const context = window.SillyTavernContext || window.getContext?.();
+    const chat = context?.chat || window.chat;
 
     if (!Array.isArray(chat)) {
-        console.error("[DFH] chat not available");
+        console.error("[DFH] chat not found");
         return;
     }
 
-    const i = Number(index);
+    console.log("[DFH] deleting from:", index);
 
-    if (Number.isNaN(i)) {
-        console.error("[DFH] invalid index:", index);
-        return;
-    }
+    // 🔥 core action
+    chat.splice(index);
 
-    chat.splice(i);
+    // 🔥 force ST to rebuild state
+    try { context?.saveChat?.(); } catch {}
+    try { window.saveChat?.(); } catch {}
 
-    ctx?.saveChat?.();
-    window.saveChat?.();
+    // 🔥 THIS is the missing piece in your versions
+    try {
+        context?.eventSource?.emit?.(context?.event_types?.CHAT_CHANGED);
+    } catch {}
 
-    ctx?.reloadCurrentChat?.();
-    window.reloadCurrentChat?.();
+    try {
+        window.eventSource?.emit?.("chat_changed");
+    } catch {}
+
+    // 🔥 hard fallback refresh (this is what actually makes it visible)
+    setTimeout(() => {
+        try { context?.reloadCurrentChat?.(); } catch {}
+        try { window.reloadCurrentChat?.(); } catch {}
+    }, 50);
 }
 
 /**
