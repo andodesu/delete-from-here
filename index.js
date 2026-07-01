@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Enhanced loader started.');
+    console.log('🚀 Delete After Here: Final version with mesid support.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -21,14 +21,13 @@
             return;
         }
 
-        // Try to find by ID; if not, maybe we have index?
-        let index = chat.findIndex(msg => msg.id === messageId);
-        if (index === -1 && typeof messageId === 'number') {
-            // If messageId is a number, treat it as index (fallback)
-            index = messageId;
-            if (index < 0 || index >= chat.length) {
-                console.error(`❌ Invalid index ${index}.`);
-                return;
+        // Try to find by ID (could be string or number)
+        let index = chat.findIndex(msg => String(msg.id) === String(messageId));
+        if (index === -1) {
+            // Fallback: try to parse as index
+            const idx = parseInt(messageId);
+            if (!isNaN(idx) && idx >= 0 && idx < chat.length) {
+                index = idx;
             }
         }
         if (index === -1) {
@@ -68,53 +67,34 @@
             e.stopPropagation();
             deleteAfter(messageId);
             // Close the menu
-            const mesElement = menu.closest('.mes, [data-message-id]');
+            const mesElement = menu.closest('.mes');
             if (mesElement) {
-                const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint, [data-toggle="dropdown"], .dropdown-toggle');
+                const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint');
                 if (toggleBtn) toggleBtn.click();
             }
         });
 
         menu.appendChild(item);
-        console.log(`✅ Option added for message with ID: ${messageId}`);
+        console.log(`✅ Option added for message ID: ${messageId}`);
         return true;
     }
 
     function getMessageId(messageElement) {
-        // Try multiple ways to get the message ID
-        // 1. data-message-id
-        let id = messageElement.dataset.messageId;
-        if (id !== undefined) return id;
+        // Use the mesid attribute directly
+        const mesId = messageElement.getAttribute('mesid');
+        if (mesId !== null) return mesId;
 
-        // 2. data-id
-        id = messageElement.dataset.id;
-        if (id !== undefined) return id;
-
-        // 3. id attribute
-        if (messageElement.id) {
-            // Often it's like "mes_123"
-            const match = messageElement.id.match(/mes[_-]?(\d+)/i);
-            if (match) return match[1];
-            return messageElement.id;
-        }
-
-        // 4. Look for a child with data-message-id
-        const childWithId = messageElement.querySelector('[data-message-id]');
-        if (childWithId) return childWithId.dataset.messageId;
-
-        // 5. Look for a child with data-id
-        const childWithDataId = messageElement.querySelector('[data-id]');
-        if (childWithDataId) return childWithDataId.dataset.id;
-
-        // 6. If all fails, log the element and return null
-        console.warn('Could not extract message ID from element:', messageElement);
+        // Fallbacks
+        if (messageElement.dataset.messageId) return messageElement.dataset.messageId;
+        if (messageElement.dataset.id) return messageElement.dataset.id;
+        if (messageElement.id) return messageElement.id;
         return null;
     }
 
     function processMessage(messageElement) {
         const messageId = getMessageId(messageElement);
-        if (!messageId) {
-            console.warn('⚠️ Skipping message: no ID found.');
+        if (messageId === null) {
+            console.warn('⚠️ Skipping message: no mesid found.');
             return;
         }
 
@@ -138,7 +118,7 @@
             setTimeout(() => {
                 let menu = messageElement.querySelector('.mes_buttons');
                 if (!menu) {
-                    // Try to find any visible mes_buttons
+                    // Try to find any visible mes_buttons (maybe it's a sibling or elsewhere)
                     menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
                 }
                 if (menu) {
@@ -168,46 +148,31 @@
             return false;
         }
 
-        const selectors = ['.mes', '.message', '[data-message-id]', '.msg'];
-        let found = false;
-        for (const sel of selectors) {
-            const msgs = chatContainer.querySelectorAll(sel);
-            if (msgs.length > 0) {
-                console.log(`✅ Found ${msgs.length} messages using selector "${sel}"`);
-                // Log first message's outerHTML for debugging (only if more than 0)
-                if (msgs.length > 0) {
-                    console.log('🔍 Sample message HTML:', msgs[0].outerHTML.substring(0, 500));
-                }
-                msgs.forEach(processMessage);
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
-            console.warn('⚠️ No messages found. Container HTML preview:');
-            console.log(chatContainer.innerHTML.substring(0, 800));
+        // Use .mes as primary selector
+        const msgs = chatContainer.querySelectorAll('.mes');
+        if (msgs.length === 0) {
+            console.warn('⚠️ No .mes elements found.');
             return false;
         }
 
-        // MutationObserver
+        console.log(`✅ Found ${msgs.length} messages.`);
+        msgs.forEach(processMessage);
+
+        // MutationObserver for new messages
         const observer = new MutationObserver(() => {
-            for (const sel of selectors) {
-                const msgs = chatContainer.querySelectorAll(sel);
-                msgs.forEach(msg => {
-                    const toggle = msg.querySelector('.mes_button.extraMesButtonsHint, [data-toggle="dropdown"], .dropdown-toggle');
-                    if (toggle && !toggle.dataset.deleteAfterHereHook) {
-                        processMessage(msg);
-                    }
-                });
-                break;
-            }
+            chatContainer.querySelectorAll('.mes').forEach(msg => {
+                const toggle = msg.querySelector('.mes_button.extraMesButtonsHint');
+                if (toggle && !toggle.dataset.deleteAfterHereHook) {
+                    processMessage(msg);
+                }
+            });
         });
         observer.observe(chatContainer, { childList: true, subtree: true });
         console.log('👀 MutationObserver running.');
         return true;
     }
 
-    // Retry mechanism
+    // Retry until messages appear (just in case they load late)
     let attempts = 0;
     const maxAttempts = 30;
     let intervalId = null;
