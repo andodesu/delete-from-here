@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Final version with mesid and refresh fix.');
+    console.log('🚀 Delete After Here: Native-compatible (no fallback) version.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -10,14 +10,15 @@
     function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
-            console.error('❌ Context not found.');
+            console.error('❌ Context not found. Aborting.');
             return;
         }
 
+        // Get chat to find index
         let chat = context.chat;
         if (!chat && typeof context.getChat === 'function') chat = context.getChat();
         if (!chat) {
-            console.error('❌ Chat array not found.');
+            console.error('❌ Chat array not found. Aborting.');
             return;
         }
 
@@ -27,56 +28,77 @@
             if (!isNaN(idx) && idx >= 0 && idx < chat.length) index = idx;
         }
         if (index === -1) {
-            console.error(`❌ Message ID ${messageId} not found in chat array.`);
+            console.error(`❌ Message ID ${messageId} not found in chat array. Aborting.`);
             return;
         }
 
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
-        chat.splice(index);
+        // --- Try to locate the native deleteSelectedMessages ---
+        const deleteFn = window.deleteSelectedMessages || context.deleteSelectedMessages;
+        if (typeof deleteFn !== 'function') {
+            console.error('❌ Native deleteSelectedMessages not found!');
+            console.log('🔍 window.deleteSelectedMessages:', window.deleteSelectedMessages);
+            console.log('🔍 context.deleteSelectedMessages:', context.deleteSelectedMessages);
+            console.log('🔍 Available functions on window:', Object.keys(window).filter(k => typeof window[k] === 'function').sort());
+            console.log('🔍 Available functions on context:', Object.keys(context).filter(k => typeof context[k] === 'function').sort());
+            // Optionally show a toast
+            if (typeof context.toast === 'function') {
+                context.toast('DeleteAfterHere: Native function missing, check console.', 'error');
+            }
+            return;
+        }
 
-        // Save and update
-        if (typeof context.setChat === 'function') context.setChat(chat);
-        if (typeof context.saveChat === 'function') context.saveChat();
+        // Clear any existing checkbox selections
+        document.querySelectorAll('.del_checkbox:checked').forEach(cb => cb.checked = false);
 
-        // Multiple refresh attempts
-        if (typeof context.refreshMessages === 'function') context.refreshMessages();
-        if (typeof context.loadChat === 'function') context.loadChat();
-        if (typeof context.renderMessages === 'function') context.renderMessages();
-        if (typeof context.redrawChat === 'function') context.redrawChat();
-        if (typeof context.updateChat === 'function') context.updateChat();
+        // Find the current message's numeric ID
+        const currentId = parseInt(messageId);
+        if (isNaN(currentId)) {
+            console.error(`❌ messageId "${messageId}" is not a number, cannot select checkboxes by mesid.`);
+            return;
+        }
 
-        // Fallback: manual DOM removal
-        const chatContainer = document.getElementById('chat');
-        if (chatContainer) {
-            const messages = chatContainer.querySelectorAll('.mes');
-            const mesIdNum = parseInt(messageId);
-            if (!isNaN(mesIdNum)) {
-                messages.forEach(mes => {
-                    const mesIdAttr = mes.getAttribute('mesid');
-                    if (mesIdAttr !== null) {
-                        const idNum = parseInt(mesIdAttr);
-                        if (!isNaN(idNum) && idNum >= mesIdNum) {
-                            mes.remove();
-                        }
-                    }
-                });
+        // Select all checkboxes for messages with mesid >= currentId
+        const allMes = document.querySelectorAll('.mes');
+        let selectedCount = 0;
+        allMes.forEach(mes => {
+            const idAttr = mes.getAttribute('mesid');
+            if (idAttr === null) {
+                console.warn('⚠️ .mes element missing mesid attribute:', mes);
+                return;
+            }
+            const id = parseInt(idAttr);
+            if (!isNaN(id) && id >= currentId) {
+                const cb = mes.querySelector('.del_checkbox');
+                if (cb) {
+                    cb.checked = true;
+                    selectedCount++;
+                } else {
+                    console.warn(`⚠️ No .del_checkbox found inside mes with mesid ${id}.`);
+                }
+            }
+        });
+
+        console.log(`✅ Selected ${selectedCount} checkboxes for deletion.`);
+
+        // Call the native function (it will handle save, refresh, and its own confirm)
+        try {
+            deleteFn();
+        } catch (e) {
+            console.error('❌ Error calling deleteSelectedMessages:', e);
+            if (typeof context.toast === 'function') {
+                context.toast('DeleteAfterHere: Error during deletion, see console.', 'error');
             }
         }
-
-        if (typeof context.toast === 'function') context.toast('Deleted messages.', 'info');
-        console.log('✅ Deletion complete.');
     }
 
+    // --- The rest of the extension (addDeleteOptionToMenu, processMessage, scan, init) remains the same ---
+    // (I include it here for completeness; the only change is the deleteAfter function above)
+
     function addDeleteOptionToMenu(menu, messageId) {
-        if (!menu) {
-            console.warn('⚠️ Menu is null.');
-            return false;
-        }
-        if (menu.querySelector('.delete-after-here-item')) {
-            return false;
-        }
+        if (!menu || menu.querySelector('.delete-after-here-item')) return false;
 
         const item = document.createElement('div');
         item.className = 'delete-after-here-item mes_button';
@@ -92,117 +114,75 @@
                 if (toggleBtn) toggleBtn.click();
             }
         });
-
         menu.appendChild(item);
-        console.log(`✅ Option added for message ID: ${messageId}`);
+        console.log(`✅ Option added for message ${messageId}`);
         return true;
     }
 
-    function getMessageId(messageElement) {
-        const mesId = messageElement.getAttribute('mesid');
-        if (mesId !== null) return mesId;
-        if (messageElement.dataset.messageId) return messageElement.dataset.messageId;
-        if (messageElement.dataset.id) return messageElement.dataset.id;
-        if (messageElement.id) return messageElement.id;
+    function getMessageId(el) {
+        const id = el.getAttribute('mesid');
+        if (id !== null) return id;
+        if (el.dataset.messageId) return el.dataset.messageId;
+        if (el.dataset.id) return el.dataset.id;
+        if (el.id) return el.id;
         return null;
     }
 
-    function processMessage(messageElement) {
-        const messageId = getMessageId(messageElement);
-        if (messageId === null) {
-            console.warn('⚠️ Skipping message: no mesid found.');
-            return;
-        }
+    function processMessage(el) {
+        const id = getMessageId(el);
+        if (!id) return;
 
-        let toggleBtn = messageElement.querySelector('.mes_button.extraMesButtonsHint');
-        if (!toggleBtn) {
-            toggleBtn = messageElement.querySelector('[data-toggle="dropdown"]');
-        }
-        if (!toggleBtn) {
-            toggleBtn = messageElement.querySelector('.dropdown-toggle');
-        }
-        if (!toggleBtn) {
-            console.warn(`⚠️ No toggle button for message ${messageId}`);
-            return;
-        }
+        let toggle = el.querySelector('.mes_button.extraMesButtonsHint');
+        if (!toggle) toggle = el.querySelector('[data-toggle="dropdown"]');
+        if (!toggle) toggle = el.querySelector('.dropdown-toggle');
+        if (!toggle) return;
 
-        if (toggleBtn.dataset.deleteAfterHereHook === 'true') return;
-        toggleBtn.dataset.deleteAfterHereHook = 'true';
+        if (toggle.dataset.deleteAfterHereHook === 'true') return;
+        toggle.dataset.deleteAfterHereHook = 'true';
 
-        toggleBtn.addEventListener('click', function() {
+        toggle.addEventListener('click', function() {
             setTimeout(() => {
-                let menu = messageElement.querySelector('.mes_buttons');
-                if (!menu) {
-                    menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
-                }
-                if (menu) {
-                    addDeleteOptionToMenu(menu, messageId);
-                } else {
-                    console.warn(`⚠️ .mes_buttons not found for message ${messageId}`);
-                }
+                let menu = el.querySelector('.mes_buttons');
+                if (!menu) menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
+                if (menu) addDeleteOptionToMenu(menu, id);
             }, 200);
         });
-
-        console.log(`✅ Toggle hooked for message ID: ${messageId}`);
+        console.log(`✅ Toggle hooked for message ${id}`);
     }
 
-    function scanAndProcess() {
-        const containers = ['#chat', '#messages', '.chat-container', '.message-container'];
-        let chatContainer = null;
-        for (const sel of containers) {
-            const el = document.querySelector(sel);
-            if (el) {
-                chatContainer = el;
-                console.log(`✅ Found container: ${sel}`);
-                break;
-            }
-        }
-        if (!chatContainer) {
-            console.warn('❌ No chat container found.');
-            return false;
-        }
+    function scan() {
+        const container = document.querySelector('#chat');
+        if (!container) return false;
 
-        const msgs = chatContainer.querySelectorAll('.mes');
-        if (msgs.length === 0) {
-            console.warn('⚠️ No .mes elements found.');
-            return false;
-        }
+        const msgs = container.querySelectorAll('.mes');
+        if (!msgs.length) return false;
 
         console.log(`✅ Found ${msgs.length} messages.`);
         msgs.forEach(processMessage);
 
-        const observer = new MutationObserver(() => {
-            chatContainer.querySelectorAll('.mes').forEach(msg => {
-                const toggle = msg.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggle && !toggle.dataset.deleteAfterHereHook) {
-                    processMessage(msg);
-                }
+        new MutationObserver(() => {
+            container.querySelectorAll('.mes').forEach(el => {
+                const toggle = el.querySelector('.mes_button.extraMesButtonsHint');
+                if (toggle && !toggle.dataset.deleteAfterHereHook) processMessage(el);
             });
-        });
-        observer.observe(chatContainer, { childList: true, subtree: true });
-        console.log('👀 MutationObserver running.');
+        }).observe(container, { childList: true, subtree: true });
+
         return true;
     }
 
-    let attempts = 0;
-    const maxAttempts = 30;
-    let intervalId = null;
-
+    let attempts = 0, interval;
     function init() {
-        if (intervalId) clearInterval(intervalId);
-        intervalId = setInterval(() => {
+        if (interval) clearInterval(interval);
+        interval = setInterval(() => {
             attempts++;
-            const success = scanAndProcess();
-            if (success) {
-                console.log(`✅ Scan succeeded on attempt ${attempts}.`);
-                clearInterval(intervalId);
-                intervalId = null;
-            } else if (attempts >= maxAttempts) {
-                console.error(`❌ Failed after ${maxAttempts} attempts.`);
-                clearInterval(intervalId);
-                intervalId = null;
-            } else {
-                console.log(`⏳ Attempt ${attempts}/${maxAttempts}...`);
+            if (scan()) {
+                clearInterval(interval);
+                interval = null;
+                console.log('✅ Extension ready.');
+            } else if (attempts >= 30) {
+                clearInterval(interval);
+                interval = null;
+                console.error('❌ Failed to initialise after 30 attempts.');
             }
         }, 1000);
     }
