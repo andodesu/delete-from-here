@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Specialised script loaded.');
+    console.log('🚀 Delete After Here: Ultimate loader started.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -23,7 +23,7 @@
 
         const index = chat.findIndex(msg => msg.id === messageId);
         if (index === -1) {
-            console.error(`❌ Message ID ${messageId} not found.`);
+            console.error(`❌ Message ID ${messageId} not found in chat array.`);
             return;
         }
 
@@ -47,127 +47,157 @@
             console.warn('⚠️ Menu element is null.');
             return false;
         }
-        // Avoid duplicates
         if (menu.querySelector('.delete-after-here-item')) {
-            console.log('ℹ️ Option already exists.');
             return false;
         }
 
-        const listItem = document.createElement('div'); // 'mes_buttons' likely uses divs, not <li>
-        listItem.className = 'delete-after-here-item mes_button'; // mimic existing button style
-        listItem.style.cursor = 'pointer';
-        listItem.textContent = '🗑️ Delete all after';
-        listItem.addEventListener('click', (e) => {
+        const item = document.createElement('div');
+        item.className = 'delete-after-here-item mes_button';
+        item.style.cursor = 'pointer';
+        item.textContent = '🗑️ Delete all after';
+        item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
-            // Close the menu – find the toggle button and click it again
-            const mesElement = menu.closest('.mes');
+            // Close the menu
+            const mesElement = menu.closest('.mes, [data-message-id]');
             if (mesElement) {
-                const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggleBtn) toggleBtn.click(); // toggle off
+                const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint, [data-toggle="dropdown"], .dropdown-toggle');
+                if (toggleBtn) toggleBtn.click();
             }
         });
 
-        menu.appendChild(listItem);
-        console.log(`✅ Delete option added for message ${messageId}`);
+        menu.appendChild(item);
+        console.log(`✅ Option added for message ${messageId}`);
         return true;
     }
 
     function processMessage(messageElement) {
         const messageId = messageElement.dataset.messageId;
         if (!messageId) {
-            console.warn('⚠️ Message has no data-message-id.');
+            console.warn('⚠️ No data-message-id, skipping.');
             return;
         }
 
         // Find the three-dots button
-        const toggleBtn = messageElement.querySelector('.mes_button.extraMesButtonsHint');
+        let toggleBtn = messageElement.querySelector('.mes_button.extraMesButtonsHint');
         if (!toggleBtn) {
-            console.warn(`⚠️ No toggle button found for message ${messageId}`);
+            toggleBtn = messageElement.querySelector('[data-toggle="dropdown"]');
+        }
+        if (!toggleBtn) {
+            toggleBtn = messageElement.querySelector('.dropdown-toggle');
+        }
+        if (!toggleBtn) {
+            console.warn(`⚠️ No toggle button for message ${messageId}`);
             return;
         }
 
-        // Avoid attaching duplicate listeners
         if (toggleBtn.dataset.deleteAfterHereHook === 'true') return;
         toggleBtn.dataset.deleteAfterHereHook = 'true';
 
         toggleBtn.addEventListener('click', function() {
-            console.log(`🖱️ Toggle clicked for message ${messageId}`);
-            // Wait a tiny bit for the menu to appear
             setTimeout(() => {
-                // The menu is likely a sibling of the button or inside the same .mes
-                // Try to find .mes_buttons inside the message element
+                // Look for .mes_buttons inside the message
                 let menu = messageElement.querySelector('.mes_buttons');
                 if (!menu) {
-                    // Sometimes it might be elsewhere – try to find it globally (less ideal)
-                    menu = document.querySelector('.mes_buttons');
+                    // Fallback: try to find any dropdown menu that appears
+                    menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
                 }
                 if (menu) {
                     addDeleteOptionToMenu(menu, messageId);
                 } else {
-                    console.warn('⚠️ Menu .mes_buttons not found.');
+                    console.warn(`⚠️ .mes_buttons not found for message ${messageId}`);
                 }
-            }, 150);
+            }, 200);
         });
 
-        console.log(`✅ Toggle listener set for message ${messageId}`);
+        console.log(`✅ Toggle hooked for message ${messageId}`);
     }
 
     function scanAndProcess() {
-        const chatContainer = document.getElementById('chat');
-        if (!chatContainer) {
-            console.warn('❌ #chat container not found.');
-            return;
-        }
-
-        // Find all messages with class 'mes'
-        const messages = chatContainer.querySelectorAll('.mes');
-        console.log(`📊 Found ${messages.length} messages.`);
-        if (messages.length === 0) {
-            console.warn('⚠️ No .mes elements found. Check if messages are loaded.');
-            // Optionally try alternative selectors
-            const altMessages = chatContainer.querySelectorAll('[data-message-id]');
-            if (altMessages.length > 0) {
-                console.log(`ℹ️ Found ${altMessages.length} elements with data-message-id. Using those.`);
-                altMessages.forEach(processMessage);
-                return;
+        // Try multiple container selectors
+        const containers = ['#chat', '#messages', '.chat-container', '.message-container'];
+        let chatContainer = null;
+        for (const sel of containers) {
+            const el = document.querySelector(sel);
+            if (el) {
+                chatContainer = el;
+                console.log(`✅ Found container: ${sel}`);
+                break;
             }
         }
-        messages.forEach(processMessage);
+        if (!chatContainer) {
+            console.warn('❌ No chat container found.');
+            return false;
+        }
 
-        // Watch for new messages
+        // Try multiple message selectors
+        const selectors = ['.mes', '.message', '[data-message-id]', '.msg'];
+        let found = false;
+        for (const sel of selectors) {
+            const msgs = chatContainer.querySelectorAll(sel);
+            if (msgs.length > 0) {
+                console.log(`✅ Found ${msgs.length} messages using selector "${sel}"`);
+                msgs.forEach(processMessage);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            console.warn('⚠️ No messages found. Here is the container HTML:');
+            console.log(chatContainer.innerHTML.substring(0, 800));
+            return false;
+        }
+
+        // MutationObserver to catch new messages
         const observer = new MutationObserver(() => {
-            chatContainer.querySelectorAll('.mes').forEach(msg => {
-                const toggle = msg.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggle && !toggle.dataset.deleteAfterHereHook) {
-                    processMessage(msg);
-                }
-            });
+            for (const sel of selectors) {
+                const msgs = chatContainer.querySelectorAll(sel);
+                msgs.forEach(msg => {
+                    const toggle = msg.querySelector('.mes_button.extraMesButtonsHint, [data-toggle="dropdown"], .dropdown-toggle');
+                    if (toggle && !toggle.dataset.deleteAfterHereHook) {
+                        processMessage(msg);
+                    }
+                });
+                break; // Only need to run once per mutation
+            }
         });
         observer.observe(chatContainer, { childList: true, subtree: true });
-        console.log('👀 Observer started.');
+        console.log('👀 MutationObserver running.');
+        return true;
     }
 
-    // Initialise
+    // Aggressive retry: try every second for 30 seconds
     let attempts = 0;
+    const maxAttempts = 30;
+    let intervalId = null;
+
     function init() {
-        attempts++;
-        if (document.getElementById('chat')) {
-            scanAndProcess();
-        } else {
-            if (attempts < 15) {
-                console.log(`⏳ Waiting for #chat... (attempt ${attempts})`);
-                setTimeout(init, 500);
+        if (intervalId) clearInterval(intervalId);
+        intervalId = setInterval(() => {
+            attempts++;
+            const success = scanAndProcess();
+            if (success) {
+                console.log(`✅ Scan succeeded on attempt ${attempts}.`);
+                clearInterval(intervalId);
+                intervalId = null;
+            } else if (attempts >= maxAttempts) {
+                console.error(`❌ Failed to find messages after ${maxAttempts} attempts.`);
+                clearInterval(intervalId);
+                intervalId = null;
             } else {
-                console.error('❌ #chat never appeared.');
+                console.log(`⏳ Attempt ${attempts}/${maxAttempts}...`);
             }
-        }
+        }, 1000);
     }
 
+    // Start when DOM is ready
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
         document.addEventListener('DOMContentLoaded', init);
     }
-    document.addEventListener('SillyTavernReady', () => setTimeout(init, 300));
+    document.addEventListener('SillyTavernReady', () => {
+        // Restart the scan when ST signals it's ready
+        setTimeout(init, 500);
+    });
 })();
