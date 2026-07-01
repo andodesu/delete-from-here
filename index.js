@@ -1,112 +1,152 @@
-console.log("[DFH] native loader active");
+// extension-delete-from-here-menu.js
+// Adds "Delete From Here" option to the message action menu
 
-function getContext() {
-    return window.SillyTavernContext
-        || window.getContext?.()
-        || null;
-}
+import { saveChatConditional } from "../../../../../script.js";
+import { event_types, eventSource } from "../../../../../script.js";
+import { getContext } from "../../../../extensions.js";
 
-function deleteFromHere(index) {
-    if (!confirm("Delete this message and all following messages?")) return;
+const extensionName = "Delete From Here - Menu";
 
-    const i = Number(index);
-    if (Number.isNaN(i)) return;
-
-    // Get the message element
-    const mes = document.querySelector(`.mes[message_id="${i}"], .mes[data-messageid="${i}"]`);
-
-    if (!mes) {
-        console.error("[DFH] message element not found for index:", i);
+/**
+ * Delete messages from given index to end of chat
+ */
+async function deleteFromHere(messageIndex) {
+    const context = getContext();
+    const chat = context.chat;
+    
+    if (!chat || !Array.isArray(chat) || chat.length === 0) {
+        toastr.warning('No messages to delete');
         return;
     }
 
-    // Find ST's own delete button and click it (reuses internal logic)
-    const deleteBtn =
-        mes.querySelector('[title*="Delete"]') ||
-        mes.querySelector('.mes_button[title*="delete"]');
-
-    if (deleteBtn) {
-        deleteBtn.click();
+    if (messageIndex < 0 || messageIndex >= chat.length) {
+        toastr.error('Invalid message index');
         return;
     }
 
-    console.error("[DFH] Could not find native delete button");
+    const deletedCount = chat.length - messageIndex;
+    const messageToDelete = chat[messageIndex];
+    const messagePreview = typeof messageToDelete?.mes === 'string' 
+        ? messageToDelete.mes.substring(0, 100) + (messageToDelete.mes.length > 100 ? '...' : '')
+        : '[message]';
+
+    // Confirmation dialog
+    const confirmMessage = `Delete from this message onward?\n\n` +
+        `"${messagePreview}"\n\n` +
+        `This will remove ${deletedCount} message(s) total.\n` +
+        `This action cannot be undone.`;
+
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+
+    // Perform deletion
+    chat.splice(messageIndex, deletedCount);
+    
+    // Save the chat
+    await saveChatConditional();
+    
+    // Show notification
+    toastr.success(`Deleted ${deletedCount} message(s)`);
+    
+    // Refresh UI
+    eventSource.emit(event_types.CHAT_CHANGED);
 }
 
 /**
- * This is the KEY upgrade:
- * Instead of scanning the DOM repeatedly,
- * we patch message rendering once.
+ * Intercept the message action menu rendering to add our option
  */
-function attachToMessage(mes) {
-    try {
-        if (!mes || mes.dataset.dfhAttached) return;
-
-        const buttons = mes.querySelector(".mes_buttons");
-        if (!buttons) return;
-
-        const btn = document.createElement("div");
-        btn.className = "mes_button dfh-btn";
-        btn.title = "Delete from here";
-        btn.textContent = "✂️";
-
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            deleteFromHere(mes.dataset.messageid);
-        };
-
-        buttons.appendChild(btn);
-
-        mes.dataset.dfhAttached = "1";
-    } catch (err) {
-        console.error("[DFH] attach error", err);
-    }
-}
-
-/**
- * 🔥 CORE UPGRADE POINT:
- * Hook into ST message rendering if available.
- */
-function hookRenderer() {
-    const ctx = getContext();
-
-    // Preferred: ST event hook
-    if (ctx?.eventSource && ctx?.event_types) {
-        ctx.eventSource.on(ctx.event_types.MESSAGE_RENDERED, (mes) => {
-            if (mes) attachToMessage(mes);
-        });
-
-        ctx.eventSource.on(ctx.event_types.CHAT_CHANGED, () => {
-            document.querySelectorAll(".mes").forEach(attachToMessage);
-        });
-
-        console.log("[DFH] hooked into ST event system");
-        return;
-    }
-
-    // Fallback: mutation observer (still better than polling)
-    const obs = new MutationObserver((mutations) => {
-        for (const m of mutations) {
-            for (const node of m.addedNodes) {
-                if (node?.classList?.contains("mes")) {
-                    attachToMessage(node);
-                }
-                if (node?.querySelectorAll) {
-                    node.querySelectorAll(".mes").forEach(attachToMessage);
-                }
+function patchMessageActions() {
+    // Wait for the message actions to be available
+    const checkForMenu = setInterval(() => {
+        // Find message action menus
+        $('.mes_buttons, .mes-edit-buttons').each(function() {
+            const buttonContainer = $(this);
+            
+            // Check if we already added our button
+            if (buttonContainer.find('.deleteFromHereBtn').length > 0) {
+                return;
             }
-        }
-    });
-
-    obs.observe(document.body, { childList: true, subtree: true });
-
-    console.log("[DFH] using MutationObserver fallback");
+            
+            // Find the message block and its ID
+            const messageBlock = buttonContainer.closest('.mes');
+            if (messageBlock.length === 0) return;
+            
+            const messageId = messageBlock.attr('mesid');
+            if (messageId === undefined) return;
+            
+            // Create our button styled to match the menu
+            const deleteBtn = $(`
+                <div class="deleteFromHereBtn interactable" 
+                     title="Delete from here" 
+                     data-mesid="${messageId}">
+                    <i class="fa-solid fa-scissors"></i>
+                    <span>Delete from here</span>
+                </div>
+            `);
+            
+            // Click handler
+            deleteBtn.on('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const mesId = $(this).data('mesid');
+                deleteFromHere(parseInt(mesId));
+                
+                // Close the menu if it's open
+                $('.mes_edit_popup, .mes-edit-popup').hide();
+            });
+            
+            // Insert into the menu - after existing delete buttons if possible
+            const existingDelete = buttonContainer.find('[data-action="delete"], .mes_btn_delete');
+            if (existingDelete.length > 0) {
+                existingDelete.after(deleteBtn);
+            } else {
+                buttonContainer.append(deleteBtn);
+            }
+        });
+    }, 500);
+    
+    // Clean up interval after some time to prevent memory leaks
+    setTimeout(() => clearInterval(checkForMenu), 10000);
 }
 
-// initial pass (safe)
-setTimeout(() => {
-    document.querySelectorAll(".mes").forEach(attachToMessage);
-}, 500);
+/**
+ * Monitor for new messages and re-patch
+ */
+function setupEventListeners() {
+    // Re-patch when chat changes
+    eventSource.on(event_types.CHAT_CHANGED, () => {
+        setTimeout(patchMessageActions, 200);
+    });
+    
+    // Re-patch when new messages are rendered
+    eventSource.on(event_types.MESSAGE_RECEIVED, () => {
+        setTimeout(patchMessageActions, 300);
+    });
+    
+    // Re-patch when messages are edited or UI updates
+    eventSource.on(event_types.MESSAGE_UPDATED, () => {
+        setTimeout(patchMessageActions, 100);
+    });
+    
+    // Watch for message swipe/regenerate
+    eventSource.on(event_types.MESSAGE_SWIPED, () => {
+        setTimeout(patchMessageActions, 100);
+    });
+}
 
-// hook system
-hookRenderer();
+// Initialize
+jQuery(async () => {
+    try {
+        // Initial patch
+        setTimeout(patchMessageActions, 1000);
+        
+        // Set up event listeners for dynamic updates
+        setupEventListeners();
+        
+        console.log(`${extensionName}: Extension loaded successfully`);
+    } catch (error) {
+        console.error(`${extensionName}: Error loading extension:`, error);
+    }
+});
