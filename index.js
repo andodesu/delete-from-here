@@ -1,64 +1,67 @@
-import { eventSource, event_types } from "../../../script.js";
-import { deleteMessages } from "../../../scripts/messages.js";
+(function () {
+    try {
+        console.log("[Delete from Here] Loading...");
 
-const BUTTON_CLASS = "st-delete-from-here-btn";
+        const BUTTON_CLASS = "st-delete-from-here-btn";
 
-/**
- * Inject button into each message actions area
- */
-function addDeleteButtonToMessage(messageElement, messageId) {
-    if (messageElement.querySelector(`.${BUTTON_CLASS}`)) return;
+        function getMessages() {
+            return document.querySelectorAll(".mes");
+        }
 
-    const actionsBar = messageElement.querySelector(".mes_buttons");
-    if (!actionsBar) return;
+        function addButton(msgEl) {
+            if (msgEl.querySelector(`.${BUTTON_CLASS}`)) return;
 
-    const btn = document.createElement("div");
-    btn.className = `mes_button ${BUTTON_CLASS}`;
-    btn.innerText = "🗑️ Delete → End";
+            const actionsBar =
+                msgEl.querySelector(".mes_buttons") ||
+                msgEl.querySelector(".mes_buttons_container") ||
+                msgEl.querySelector(".mes-controls");
 
-    btn.style.cursor = "pointer";
+            if (!actionsBar) return;
 
-    btn.addEventListener("click", (e) => {
-        e.stopPropagation();
+            const id = Number(msgEl.getAttribute("mesid"));
+            if (isNaN(id)) return;
 
-        const confirmDelete = confirm("Delete this message and all messages after it?");
-        if (!confirmDelete) return;
+            const btn = document.createElement("div");
+            btn.className = `mes_button ${BUTTON_CLASS}`;
+            btn.innerText = "🗑️ Delete from Here";
 
-        // Core SillyTavern function (fast path, no UI navigation)
-        deleteMessages(messageId, /* inclusive */ true);
-    });
+            btn.style.cursor = "pointer";
 
-    actionsBar.appendChild(btn);
-}
+            btn.addEventListener("click", (e) => {
+                e.stopPropagation();
 
-/**
- * Scan all messages currently in DOM
- */
-function processMessages() {
-    const messages = document.querySelectorAll(".mes");
+                if (!confirm("Delete this message and all messages after it?")) return;
 
-    messages.forEach((msgEl) => {
-        const messageId = Number(msgEl.getAttribute("mesid"));
-        if (isNaN(messageId)) return;
+                // Try ST native delete system via DOM event (version-safe approach)
+                const event = new CustomEvent("delete-messages-from-index", {
+                    detail: { messageId: id }
+                });
 
-        addDeleteButtonToMessage(msgEl, messageId);
-    });
-}
+                window.dispatchEvent(event);
+            });
 
-/**
- * Hook into SillyTavern render cycle
- */
-function init() {
-    // Initial pass
-    processMessages();
+            actionsBar.appendChild(btn);
+        }
 
-    // Re-run whenever messages update
-    eventSource.on(event_types.MESSAGE_RECEIVED, processMessages);
-    eventSource.on(event_types.MESSAGE_DELETED, processMessages);
-    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, processMessages);
-}
+        function scan() {
+            getMessages().forEach(addButton);
+        }
 
-/**
- * Register extension
- */
-init();
+        function init() {
+            scan();
+
+            const observer = new MutationObserver(scan);
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
+            console.log("[Delete from Here] Loaded successfully");
+        }
+
+        init();
+
+    } catch (err) {
+        console.error("[Delete from Here] Init failed:", err);
+    }
+})();
