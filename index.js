@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Clean version.');
+    console.log('🚀 Delete After Here: Clean with show/hide events.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -78,7 +78,7 @@
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu) return;
 
-        // Remove existing to avoid duplicates
+        // Remove any existing item to avoid duplicates
         const existing = menu.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -123,17 +123,39 @@
         const toggle = el.querySelector('.mes_button.extraMesButtonsHint');
         if (!toggle) return;
 
-        if (toggle.dataset.deleteAfterHereHook === 'true') return;
-        toggle.dataset.deleteAfterHereHook = 'true';
+        // Find the dropdown container (the element with .dropdown class)
+        const dropdown = toggle.closest('.dropdown');
+        if (!dropdown) return;
 
-        toggle.addEventListener('click', function() {
-            setTimeout(() => {
-                const menu = el.querySelector('.mes_buttons');
-                if (menu) {
-                    addDeleteOptionToMenu(menu, id);
-                }
-            }, 200);
+        // Avoid attaching duplicate event listeners
+        if (dropdown.dataset.deleteAfterHereProcessed === 'true') return;
+        dropdown.dataset.deleteAfterHereProcessed = 'true';
+
+        // When the dropdown opens, add our option
+        dropdown.addEventListener('shown.bs.dropdown', function() {
+            // Find the menu (could be .mes_buttons or .dropdown-menu)
+            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                addDeleteOptionToMenu(menu, id);
+            }
         });
+
+        // When the dropdown closes, remove our option
+        dropdown.addEventListener('hidden.bs.dropdown', function() {
+            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                const item = menu.querySelector('.delete-after-here-item');
+                if (item) item.remove();
+            }
+        });
+
+        // If the dropdown is already open when the extension loads (rare), add now
+        if (dropdown.classList.contains('show')) {
+            const menu = dropdown.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                addDeleteOptionToMenu(menu, id);
+            }
+        }
     }
 
     function scan() {
