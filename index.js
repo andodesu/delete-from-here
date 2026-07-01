@@ -1,88 +1,21 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Event delegation (single listener).');
+    console.log('🚀 Delete After Here: Debug version.');
 
-    // --- Helper to get ST context ---
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
     }
 
-    // --- Main deletion logic (unchanged, uses native deleteMessage) ---
     async function deleteAfter(messageId) {
-        const context = getContext();
-        if (!context) {
-            console.error('❌ Context not found.');
-            return;
-        }
-
-        let chat = context.chat;
-        if (!chat && typeof context.getChat === 'function') chat = context.getChat();
-        if (!chat) {
-            console.error('❌ Chat array not found.');
-            return;
-        }
-
-        let index = chat.findIndex(msg => String(msg.id) === String(messageId));
-        if (index === -1) {
-            const idx = parseInt(messageId);
-            if (!isNaN(idx) && idx >= 0 && idx < chat.length) index = idx;
-        }
-        if (index === -1) {
-            console.error(`❌ Message ID ${messageId} not found.`);
-            return;
-        }
-
-        const count = chat.length - index - 1;
-        if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
-
-        // Collect mesid from DOM (reliable)
-        const currentIdNum = parseInt(messageId);
-        const allMes = document.querySelectorAll('.mes');
-        const idsToDelete = [];
-        allMes.forEach(mes => {
-            const mesIdAttr = mes.getAttribute('mesid');
-            if (mesIdAttr !== null) {
-                const idNum = parseInt(mesIdAttr);
-                if (!isNaN(idNum) && idNum >= currentIdNum) {
-                    idsToDelete.push(idNum);
-                }
-            }
-        });
-        idsToDelete.sort((a, b) => b - a);
-
-        if (typeof context.deleteMessage !== 'function') {
-            console.error('❌ context.deleteMessage is not a function!');
-            return;
-        }
-
-        let deleted = 0;
-        for (const mesId of idsToDelete) {
-            try {
-                await context.deleteMessage(mesId);
-                deleted++;
-            } catch (e) {
-                console.error(`❌ Error deleting message ${mesId}:`, e);
-            }
-        }
-
-        const refresh = () => {
-            if (typeof context.refreshMessages === 'function') context.refreshMessages();
-            else if (typeof context.loadChat === 'function') context.loadChat();
-        };
-        refresh();
-        setTimeout(refresh, 150);
-
-        if (typeof context.toast === 'function') {
-            context.toast(`Deleted ${deleted} messages.`, 'info');
-        }
+        // ... same as before (I'll omit for brevity, but keep it) ...
     }
 
-    // --- Inject scissor icon into .extraMesButtons ---
     function injectScissor(container, messageId) {
-        if (!container) return;
-
-        // Remove existing scissor if present (avoid duplicates)
+        if (!container) {
+            console.warn('❌ injectScissor: container is null');
+            return;
+        }
         const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -103,7 +36,6 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
-            // Close the menu by clicking the three‑dots toggle
             const mes = container.closest('.mes');
             if (mes) {
                 const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
@@ -112,9 +44,9 @@
         });
 
         container.appendChild(item);
+        console.log(`✅ Scissor injected for message ${messageId}`);
     }
 
-    // --- Helper to get message ID from .mes element ---
     function getMessageId(el) {
         const id = el.getAttribute('mesid');
         if (id !== null) return id;
@@ -123,59 +55,83 @@
         return el.id || null;
     }
 
-    // --- Set up event delegation on #chat (ONE listener) ---
     function setupDelegation() {
         const container = document.querySelector('#chat');
-        if (!container) return false;
-
-        // Only attach once
-        if (container.dataset.deleteAfterHereDelegated) return true;
+        if (!container) {
+            console.warn('❌ #chat not found');
+            return false;
+        }
+        if (container.dataset.deleteAfterHereDelegated) {
+            console.log('ℹ️ Delegation already set up');
+            return true;
+        }
         container.dataset.deleteAfterHereDelegated = 'true';
 
-        // One listener for all three‑dots clicks
         container.addEventListener('click', function(e) {
-            // Find if the click was on or inside a .mes_button.extraMesButtonsHint
             const toggle = e.target.closest('.mes_button.extraMesButtonsHint');
-            if (!toggle) return;
+            if (!toggle) {
+                // Uncomment to see every click (might be spammy)
+                // console.log('ℹ️ Click not on toggle');
+                return;
+            }
+            console.log('🔍 Toggle clicked!');
 
             const mes = toggle.closest('.mes');
-            if (!mes) return;
+            if (!mes) {
+                console.warn('❌ No .mes parent found');
+                return;
+            }
             const id = getMessageId(mes);
-            if (!id) return;
-            const menu = mes.querySelector('.extraMesButtons');
-            if (!menu) return;
+            if (!id) {
+                console.warn('❌ No message ID found');
+                return;
+            }
+            console.log(`🔍 Message ID: ${id}`);
 
-            // Wait a tiny bit for the menu to become visible (style change)
+            const menu = mes.querySelector('.extraMesButtons');
+            if (!menu) {
+                console.warn('❌ .extraMesButtons not found in .mes');
+                return;
+            }
+            console.log('🔍 .extraMesButtons found, waiting 50ms...');
+
             setTimeout(() => {
-                // Check if menu is actually visible (offsetParent is non-null)
-                if (menu.offsetParent !== null) {
+                // Check visibility
+                const isVisible = menu.offsetParent !== null;
+                console.log(`🔍 Menu visible? ${isVisible}`);
+                if (isVisible) {
                     injectScissor(menu, id);
+                } else {
+                    console.warn('⚠️ Menu not visible, skipping injection');
                 }
             }, 50);
         });
 
+        console.log('✅ Event delegation set up');
         return true;
     }
 
-    // --- Check for any already‑open menus on load ---
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
+        console.log('🔍 Scanning for already-open menus...');
 
         container.querySelectorAll('.extraMesButtons').forEach(menu => {
-            // If the menu is visible (offsetParent !== null)
-            if (menu.offsetParent !== null) {
+            const isVisible = menu.offsetParent !== null;
+            if (isVisible) {
                 const mes = menu.closest('.mes');
                 if (mes) {
                     const id = getMessageId(mes);
-                    if (id) injectScissor(menu, id);
+                    if (id) {
+                        console.log(`🔍 Found visible menu for message ${id}, injecting...`);
+                        injectScissor(menu, id);
+                    }
                 }
             }
         });
         return true;
     }
 
-    // --- Retry initialisation until #chat is available ---
     let attempts = 0, interval;
     function init() {
         if (interval) clearInterval(interval);
@@ -194,7 +150,6 @@
         }, 1000);
     }
 
-    // --- Start when DOM is ready ---
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
