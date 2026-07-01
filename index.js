@@ -1,111 +1,64 @@
-console.log("[DeleteFromHere] loaded");
+import { eventSource, event_types } from "../../../script.js";
+import { deleteMessages } from "../../../scripts/messages.js";
+
+const BUTTON_CLASS = "st-delete-from-here-btn";
 
 /**
- * Delete from a given message onward
- * (uses SillyTavern's own UI delete flow as fallback-safe method)
+ * Inject button into each message actions area
  */
-function deleteFromHere(index) {
-    if (!confirm("Delete this message and all following messages?")) return;
+function addDeleteButtonToMessage(messageElement, messageId) {
+    if (messageElement.querySelector(`.${BUTTON_CLASS}`)) return;
 
-    const mes =
-        document.querySelector(`.mes[data-messageid="${index}"]`) ||
-        document.querySelector(`.mes[message_id="${index}"]`);
+    const actionsBar = messageElement.querySelector(".mes_buttons");
+    if (!actionsBar) return;
 
-    if (!mes) {
-        console.error("[DFH] message not found for index:", index);
-        return;
-    }
+    const btn = document.createElement("div");
+    btn.className = `mes_button ${BUTTON_CLASS}`;
+    btn.innerText = "🗑️ Delete → End";
 
-    // Try to find ST's built-in delete button and click it
-    const candidates = mes.querySelectorAll("button, .mes_button, div");
+    btn.style.cursor = "pointer";
 
-    for (const el of candidates) {
-        const title = (el.getAttribute("title") || "").toLowerCase();
-        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+    btn.addEventListener("click", (e) => {
+        e.stopPropagation();
 
-        if (title.includes("delete") || aria.includes("delete")) {
-            el.click();
-            console.log("[DFH] triggered native delete");
-            return;
-        }
-    }
+        const confirmDelete = confirm("Delete this message and all messages after it?");
+        if (!confirmDelete) return;
 
-    console.error("[DFH] could not find native delete button in message UI");
+        // Core SillyTavern function (fast path, no UI navigation)
+        deleteMessages(messageId, /* inclusive */ true);
+    });
+
+    actionsBar.appendChild(btn);
 }
 
 /**
- * Inject button into message UI
+ * Scan all messages currently in DOM
  */
-function injectButton(mes) {
-    try {
-        if (!mes || mes.dataset.dfhAttached === "1") return;
+function processMessages() {
+    const messages = document.querySelectorAll(".mes");
 
-        const buttons = mes.querySelector(".mes_buttons");
-        if (!buttons) return;
+    messages.forEach((msgEl) => {
+        const messageId = Number(msgEl.getAttribute("mesid"));
+        if (isNaN(messageId)) return;
 
-        const btn = document.createElement("div");
-        btn.className = "mes_button dfh-btn";
-        btn.title = "Delete from here";
-        btn.textContent = "✂️";
-
-        btn.onclick = (e) => {
-            e.stopPropagation();
-
-            const id =
-                mes.dataset.messageid ||
-                mes.getAttribute("message_id");
-
-            if (id == null) {
-                console.error("[DFH] missing message id on element");
-                return;
-            }
-
-            deleteFromHere(id);
-        };
-
-        buttons.appendChild(btn);
-
-        mes.dataset.dfhAttached = "1";
-    } catch (err) {
-        console.error("[DFH inject error]", err);
-    }
+        addDeleteButtonToMessage(msgEl, messageId);
+    });
 }
 
 /**
- * Scan all messages once per render cycle
+ * Hook into SillyTavern render cycle
  */
-function scan() {
-    try {
-        document.querySelectorAll(".mes").forEach(injectButton);
-    } catch (e) {
-        console.error("[DFH scan error]", e);
-    }
+function init() {
+    // Initial pass
+    processMessages();
+
+    // Re-run whenever messages update
+    eventSource.on(event_types.MESSAGE_RECEIVED, processMessages);
+    eventSource.on(event_types.MESSAGE_DELETED, processMessages);
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, processMessages);
 }
 
 /**
- * Hook into ST events if they exist (safe optional usage)
+ * Register extension
  */
-function hookEvents() {
-    const ctx = window.SillyTavernContext || window.getContext?.();
-
-    const es = ctx?.eventSource || window.eventSource;
-    const et = ctx?.event_types || window.event_types;
-
-    if (es && et) {
-        es.on(et.CHAT_CHANGED, scan);
-        es.on(et.MESSAGE_RENDERED, scan);
-        console.log("[DFH] hooked into ST events");
-        return;
-    }
-
-    console.log("[DFH] using fallback scan loop");
-    setInterval(scan, 1500);
-}
-
-/**
- * Init
- */
-setTimeout(scan, 500);
-hookEvents();
-
-console.log("[DeleteFromHere] ready");
+init();
