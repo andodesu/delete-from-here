@@ -1,59 +1,50 @@
-console.log("[DeleteFromHere] loaded");
-
 function deleteFromHere(index) {
     if (!confirm("Delete this message and all following messages?")) return;
 
-    const chat = window.chat;
+    const context = window.SillyTavernContext || window.getContext?.();
+
+    // fallback chain to find chat
+    const chat = context?.chat || window.chat;
 
     if (!Array.isArray(chat)) {
-        console.error("[DeleteFromHere] chat not found");
+        console.error("[DFH] chat not found");
         return;
     }
 
-    chat.splice(index);
+    console.log("[DFH] deleting from", index);
 
-    // safest possible save calls
-    try { window.saveChat?.(); } catch (e) {}
-    try { window.reloadCurrentChat?.(); } catch (e) {}
-}
+    // 🔴 KEY FIX: ensure index is valid in real chat array
+    const realIndex = chat.findIndex((_, i) => i === index);
 
-function addButton(mes) {
+    const start = realIndex >= 0 ? realIndex : index;
+
+    // remove messages
+    chat.splice(start);
+
+    // 🔴 force ST to rebuild state properly
     try {
-        const buttons = mes.querySelector(".mes_buttons");
-        if (!buttons) return;
+        context?.saveChat?.();
+    } catch {}
 
-        if (buttons.querySelector(".delete-from-here")) return;
-
-        const btn = document.createElement("div");
-        btn.className = "mes_button delete-from-here";
-        btn.title = "Delete from here";
-        btn.textContent = "✂️";
-
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            const id = Number(mes.dataset.messageid);
-            deleteFromHere(id);
-        };
-
-        buttons.appendChild(btn);
-    } catch (err) {
-        console.error("[DeleteFromHere] inject error", err);
-    }
-}
-
-function scan() {
     try {
-        document.querySelectorAll(".mes").forEach(addButton);
-    } catch (e) {
-        console.error("[DeleteFromHere] scan failed", e);
-    }
+        window.saveChat?.();
+    } catch {}
+
+    // 🔴 MOST IMPORTANT: trigger full refresh properly
+    try {
+        context?.eventSource?.emit?.(context?.event_types?.CHAT_CHANGED);
+    } catch {}
+
+    try {
+        window.eventSource?.emit?.("chat_changed");
+    } catch {}
+
+    // fallback hard reload (this is what guarantees visible change)
+    try {
+        context?.reloadCurrentChat?.();
+    } catch {}
+
+    try {
+        window.reloadCurrentChat?.();
+    } catch {}
 }
-
-// multiple safe entry points (ST is inconsistent across builds)
-setTimeout(scan, 500);
-setTimeout(scan, 1500);
-setTimeout(scan, 3000);
-
-document.addEventListener("DOMContentLoaded", scan);
-
-console.log("[DeleteFromHere] init complete");
