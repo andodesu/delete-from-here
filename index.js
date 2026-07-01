@@ -80,7 +80,7 @@
         }
     }
 
-    // --- Updated: scissor icon instead of text ---
+    // --- Updated: scissor icon with matching size ---
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu || menu.querySelector('.delete-after-here-item')) return false;
 
@@ -90,8 +90,9 @@
         item.title = 'Delete all after this message';
 
         const icon = document.createElement('i');
-        icon.className = 'fa-solid fa-scissors';
-        icon.style.fontSize = '1.1em';
+        icon.className = 'fa-solid fa-scissors fa-fw'; // fa-fw for fixed width alignment
+        icon.style.fontSize = '0.9em'; // match typical icon size
+        icon.style.verticalAlign = 'middle';
         item.appendChild(icon);
 
         item.addEventListener('click', (e) => {
@@ -109,7 +110,6 @@
         return true;
     }
 
-    // --- Rest of the extension unchanged ---
     function getMessageId(el) {
         const id = el.getAttribute('mesid');
         if (id !== null) return id;
