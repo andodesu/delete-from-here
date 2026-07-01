@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Using native deleteMessage (official API).');
+    console.log('🚀 Delete After Here: Clean DOM injection with event cleanup.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -80,9 +80,12 @@
         }
     }
 
-    // --- Updated: scissor icon with fine-tuned alignment ---
+    // --- Clean button injection with show/hide events ---
     function addDeleteOptionToMenu(menu, messageId) {
-        if (!menu || menu.querySelector('.delete-after-here-item')) return false;
+        if (!menu) return false;
+        // Remove any existing item first (avoids duplicates)
+        const existing = menu.querySelector('.delete-after-here-item');
+        if (existing) existing.remove();
 
         const item = document.createElement('div');
         item.className = 'delete-after-here-item mes_button';
@@ -91,15 +94,15 @@
 
         const icon = document.createElement('i');
         icon.className = 'fa-solid fa-scissors fa-fw';
-        icon.style.fontSize = '0.98em';
-        // Nudge the icon up to align with other icons
-        icon.style.transform = 'translateY(-3px)';
+        icon.style.fontSize = '0.9em';
+        icon.style.transform = 'translateY(-1px)';
         icon.style.display = 'inline-block';
         item.appendChild(icon);
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
+            // Close the dropdown
             const mesElement = menu.closest('.mes');
             if (mesElement) {
                 const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint');
@@ -133,13 +136,37 @@
         if (toggle.dataset.deleteAfterHereHook === 'true') return;
         toggle.dataset.deleteAfterHereHook = 'true';
 
-        toggle.addEventListener('click', function() {
-            setTimeout(() => {
-                let menu = el.querySelector('.mes_buttons');
-                if (!menu) menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
-                if (menu) addDeleteOptionToMenu(menu, id);
-            }, 200);
+        const dropdown = toggle.closest('.dropdown');
+        if (!dropdown) {
+            console.warn(`⚠️ No .dropdown parent for message ${id}`);
+            return;
+        }
+
+        // Add item when dropdown opens
+        dropdown.addEventListener('shown.bs.dropdown', function() {
+            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                addDeleteOptionToMenu(menu, id);
+            }
         });
+
+        // Remove item when dropdown closes
+        dropdown.addEventListener('hidden.bs.dropdown', function() {
+            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                const item = menu.querySelector('.delete-after-here-item');
+                if (item) item.remove();
+            }
+        });
+
+        // If dropdown is already open (rare), add immediately
+        if (dropdown.classList.contains('show')) {
+            const menu = dropdown.querySelector('.mes_buttons, .dropdown-menu');
+            if (menu) {
+                addDeleteOptionToMenu(menu, id);
+            }
+        }
+
         console.log(`✅ Toggle hooked for message ${id}`);
     }
 
