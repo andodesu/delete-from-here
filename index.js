@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Using native context.deleteMessage for all messages.');
+    console.log('🚀 Delete After Here: Using native deleteMessage with DOM mesid.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -34,8 +34,22 @@
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
-        const idsToDelete = chat.slice(index).map(msg => msg.id);
-        console.log(`📤 Will delete ${idsToDelete.length} messages:`, idsToDelete);
+        // Collect mesid from DOM
+        const currentIdNum = parseInt(messageId);
+        const allMes = document.querySelectorAll('.mes');
+        const idsToDelete = [];
+        allMes.forEach(mes => {
+            const mesIdAttr = mes.getAttribute('mesid');
+            if (mesIdAttr !== null) {
+                const idNum = parseInt(mesIdAttr);
+                if (!isNaN(idNum) && idNum >= currentIdNum) {
+                    idsToDelete.push(idNum);
+                }
+            }
+        });
+        idsToDelete.sort((a, b) => b - a);
+
+        console.log(`📤 Will delete ${idsToDelete.length} messages with mesid:`, idsToDelete);
 
         if (typeof context.deleteMessage !== 'function') {
             console.error('❌ context.deleteMessage is not a function!');
@@ -43,10 +57,9 @@
         }
 
         let deleted = 0;
-        for (let i = idsToDelete.length - 1; i >= 0; i--) {
-            const mesId = idsToDelete[i];
+        for (const mesId of idsToDelete) {
             try {
-                console.log(`🗑️ Deleting message with id ${mesId}`);
+                console.log(`🗑️ Deleting message with mesid ${mesId}`);
                 await context.deleteMessage(mesId);
                 deleted++;
             } catch (e) {
@@ -68,7 +81,7 @@
         }
     }
 
-    // --- Menu injection and other helpers (unchanged) ---
+    // --- The rest of the extension (unchanged) ---
 
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu || menu.querySelector('.delete-after-here-item')) return false;
