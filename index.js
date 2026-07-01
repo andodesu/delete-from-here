@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Final version with mesid support.');
+    console.log('🚀 Delete After Here: Final version with mesid and refresh fix.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -21,14 +21,10 @@
             return;
         }
 
-        // Try to find by ID (could be string or number)
         let index = chat.findIndex(msg => String(msg.id) === String(messageId));
         if (index === -1) {
-            // Fallback: try to parse as index
             const idx = parseInt(messageId);
-            if (!isNaN(idx) && idx >= 0 && idx < chat.length) {
-                index = idx;
-            }
+            if (!isNaN(idx) && idx >= 0 && idx < chat.length) index = idx;
         }
         if (index === -1) {
             console.error(`❌ Message ID ${messageId} not found in chat array.`);
@@ -40,11 +36,34 @@
 
         chat.splice(index);
 
+        // Save and update
+        if (typeof context.setChat === 'function') context.setChat(chat);
         if (typeof context.saveChat === 'function') context.saveChat();
-        else if (typeof context.setChat === 'function') context.setChat(chat);
 
+        // Multiple refresh attempts
         if (typeof context.refreshMessages === 'function') context.refreshMessages();
-        else if (typeof context.loadChat === 'function') context.loadChat();
+        if (typeof context.loadChat === 'function') context.loadChat();
+        if (typeof context.renderMessages === 'function') context.renderMessages();
+        if (typeof context.redrawChat === 'function') context.redrawChat();
+        if (typeof context.updateChat === 'function') context.updateChat();
+
+        // Fallback: manual DOM removal
+        const chatContainer = document.getElementById('chat');
+        if (chatContainer) {
+            const messages = chatContainer.querySelectorAll('.mes');
+            const mesIdNum = parseInt(messageId);
+            if (!isNaN(mesIdNum)) {
+                messages.forEach(mes => {
+                    const mesIdAttr = mes.getAttribute('mesid');
+                    if (mesIdAttr !== null) {
+                        const idNum = parseInt(mesIdAttr);
+                        if (!isNaN(idNum) && idNum >= mesIdNum) {
+                            mes.remove();
+                        }
+                    }
+                });
+            }
+        }
 
         if (typeof context.toast === 'function') context.toast('Deleted messages.', 'info');
         console.log('✅ Deletion complete.');
@@ -80,11 +99,8 @@
     }
 
     function getMessageId(messageElement) {
-        // Use the mesid attribute directly
         const mesId = messageElement.getAttribute('mesid');
         if (mesId !== null) return mesId;
-
-        // Fallbacks
         if (messageElement.dataset.messageId) return messageElement.dataset.messageId;
         if (messageElement.dataset.id) return messageElement.dataset.id;
         if (messageElement.id) return messageElement.id;
@@ -98,7 +114,6 @@
             return;
         }
 
-        // Find the three-dots button
         let toggleBtn = messageElement.querySelector('.mes_button.extraMesButtonsHint');
         if (!toggleBtn) {
             toggleBtn = messageElement.querySelector('[data-toggle="dropdown"]');
@@ -118,7 +133,6 @@
             setTimeout(() => {
                 let menu = messageElement.querySelector('.mes_buttons');
                 if (!menu) {
-                    // Try to find any visible mes_buttons (maybe it's a sibling or elsewhere)
                     menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
                 }
                 if (menu) {
@@ -148,7 +162,6 @@
             return false;
         }
 
-        // Use .mes as primary selector
         const msgs = chatContainer.querySelectorAll('.mes');
         if (msgs.length === 0) {
             console.warn('⚠️ No .mes elements found.');
@@ -158,7 +171,6 @@
         console.log(`✅ Found ${msgs.length} messages.`);
         msgs.forEach(processMessage);
 
-        // MutationObserver for new messages
         const observer = new MutationObserver(() => {
             chatContainer.querySelectorAll('.mes').forEach(msg => {
                 const toggle = msg.querySelector('.mes_button.extraMesButtonsHint');
@@ -172,7 +184,6 @@
         return true;
     }
 
-    // Retry until messages appear (just in case they load late)
     let attempts = 0;
     const maxAttempts = 30;
     let intervalId = null;
