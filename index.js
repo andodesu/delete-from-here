@@ -1,20 +1,19 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Using native context.deleteMessage.');
+    console.log('🚀 Delete After Here: Using native context.deleteMessage for all messages.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
     }
 
-    function deleteAfter(messageId) {
+    async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
             console.error('❌ Context not found.');
             return;
         }
 
-        // Get chat array to find the index
         let chat = context.chat;
         if (!chat && typeof context.getChat === 'function') chat = context.getChat();
         if (!chat) {
@@ -22,7 +21,6 @@
             return;
         }
 
-        // Find index from messageId
         let index = chat.findIndex(msg => String(msg.id) === String(messageId));
         if (index === -1) {
             const idx = parseInt(messageId);
@@ -36,31 +34,28 @@
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
-        // --- Use native context.deleteMessage ---
+        const idsToDelete = chat.slice(index).map(msg => msg.id);
+        console.log(`📤 Will delete ${idsToDelete.length} messages:`, idsToDelete);
+
         if (typeof context.deleteMessage !== 'function') {
             console.error('❌ context.deleteMessage is not a function!');
-            console.log('🔍 context.deleteMessage:', context.deleteMessage);
             return;
         }
 
-        console.log(`📤 Calling context.deleteMessage with index ${index} (mesid ${messageId})`);
-
-        try {
-            // Call the native delete function – it should handle saving and UI refresh
-            // It may be synchronous or async; we'll call and then force a refresh just in case.
-            const result = context.deleteMessage(index); // try with index
-            // If it returns a promise, we could await, but we'll just proceed.
-            // Many ST functions are synchronous.
-            console.log('✅ context.deleteMessage returned:', result);
-        } catch (e) {
-            console.error('❌ Error calling context.deleteMessage:', e);
-            if (typeof context.toast === 'function') {
-                context.toast('DeleteAfterHere: Error during deletion, see console.', 'error');
+        let deleted = 0;
+        for (let i = idsToDelete.length - 1; i >= 0; i--) {
+            const mesId = idsToDelete[i];
+            try {
+                console.log(`🗑️ Deleting message with id ${mesId}`);
+                await context.deleteMessage(mesId);
+                deleted++;
+            } catch (e) {
+                console.error(`❌ Error deleting message ${mesId}:`, e);
             }
-            return;
         }
 
-        // Force UI refresh (in case deleteMessage doesn't refresh)
+        console.log(`✅ Deleted ${deleted} messages using native deleteMessage.`);
+
         const refresh = () => {
             if (typeof context.refreshMessages === 'function') context.refreshMessages();
             else if (typeof context.loadChat === 'function') context.loadChat();
@@ -69,12 +64,12 @@
         setTimeout(refresh, 150);
 
         if (typeof context.toast === 'function') {
-            context.toast('Deleted messages using native deleteMessage.', 'info');
+            context.toast(`Deleted ${deleted} messages.`, 'info');
         }
-        console.log('✅ Deletion via native deleteMessage complete.');
     }
 
-    // --- The rest of the extension (menu injection, processMessage, scan, init) ---
+    // --- Menu injection and other helpers (unchanged) ---
+
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu || menu.querySelector('.delete-after-here-item')) return false;
 
@@ -85,7 +80,6 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
-            // Close the menu
             const mesElement = menu.closest('.mes');
             if (mesElement) {
                 const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint');
