@@ -1,74 +1,28 @@
-console.log("[DeleteFromHere] extension loaded");
-
-function getChat() {
-    // Try all known safe sources
-    if (window.chat) return window.chat;
-    if (window.SillyTavernContext?.chat) return window.SillyTavernContext.chat;
-    if (window.getContext?.()?.chat) return window.getContext().chat;
-    return null;
-}
-
-function save() {
-    window.saveChat?.();
-    window.SillyTavernContext?.saveChat?.();
-    window.getContext?.()?.saveChat?.();
-}
-
-function reload() {
-    window.reloadCurrentChat?.();
-    window.SillyTavernContext?.reloadCurrentChat?.();
-    window.getContext?.()?.reloadCurrentChat?.();
-}
-
-function deleteFromHere(id) {
+function deleteFromHere(messageId) {
     if (!confirm("Delete this message and all following messages?")) return;
 
-    const chat = getChat();
+    const context = window.SillyTavernContext || window.getContext?.();
 
-    if (!chat) {
-        console.error("[DeleteFromHere] chat not found");
+    if (!context || !Array.isArray(context.chat)) {
+        console.error("[DeleteFromHere] No valid context.chat found", context);
         return;
     }
 
-    chat.splice(id);
+    const chat = context.chat;
 
-    save();
-    reload();
-}
+    console.log("[DeleteFromHere] deleting from index:", messageId);
 
-function addButton(mes) {
-    try {
-        const buttons = mes.querySelector(".mes_buttons");
-        if (!buttons) return;
+    chat.splice(messageId);
 
-        if (buttons.querySelector(".delete-from-here")) return;
+    // 🔴 IMPORTANT: force ST to recognize state change
+    context.saveChat?.();
+    window.saveChat?.();
 
-        const btn = document.createElement("div");
-        btn.className = "mes_button delete-from-here";
-        btn.title = "Delete from here";
-        btn.textContent = "✂️";
+    // 🔴 THIS is what actually triggers UI refresh in 1.18+
+    context.eventSource?.emit?.(context.event_types?.CHAT_CHANGED);
+    window.eventSource?.emit?.("chat_changed");
 
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            const id = Number(mes.dataset.messageid);
-            deleteFromHere(id);
-        };
-
-        buttons.appendChild(btn);
-    } catch (err) {
-        console.error("[DeleteFromHere] inject error:", err);
-    }
-}
-
-function scan() {
-    document.querySelectorAll(".mes").forEach(addButton);
-}
-
-// initial + fallback safety net
-setTimeout(scan, 800);
-setTimeout(scan, 2000);
-
-if (window.eventSource && window.event_types) {
-    window.eventSource.on(window.event_types.CHAT_CHANGED, scan);
-    window.eventSource.on(window.event_types.MESSAGE_RENDERED, scan);
+    // fallback hard refresh of chat view
+    context.reloadCurrentChat?.();
+    window.reloadCurrentChat?.();
 }
