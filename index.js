@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Loaded (with custom modal).');
+    console.log('🚀 Delete After Here: Loaded (with fixed modal).');
 
     // --- Helpers ---
     function getContext() {
@@ -24,7 +24,7 @@
         );
     }
 
-    // --- Confirmation using ST's native modal ---
+    // --- Confirmation using ST's native modal (with robust handling) ---
     async function confirmWithModal(message) {
         const context = getContext();
         if (context && typeof context.callGenericPopup === 'function') {
@@ -33,7 +33,12 @@
                     okButton: 'Delete',
                     cancelButton: 'Cancel',
                 });
-                return result === true;
+                console.log('🔍 Popup result:', result); // Debug: check console
+                // Affirmative if result is true, or equals "Delete", or is a truthy non-cancel value
+                if (result === true || result === 'Delete' || (typeof result === 'string' && result.toLowerCase() === 'delete')) {
+                    return true;
+                }
+                return false;
             } catch (e) {
                 console.error('Popup error, falling back to confirm:', e);
                 return confirm(message);
