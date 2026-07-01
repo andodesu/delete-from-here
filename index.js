@@ -1,13 +1,20 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Loaded (fixed for result=1).');
+    // ============================================================
+    // SillyTavern Extension: Delete All After
+    // Adds a scissor icon (✂️) to each message's action menu.
+    // Clicking it deletes that message and all messages after it.
+    // ============================================================
 
     // --- Helpers ---
+
+    /** Get SillyTavern's extension context */
     function getContext() {
         return window.SillyTavern?.getContext() || null;
     }
 
+    /** Extract message ID from a .mes element */
     function getMessageId(el) {
         return el.getAttribute('mesid')
             || el.dataset.messageId
@@ -16,6 +23,7 @@
             || null;
     }
 
+    /** Check if a menu element is currently visible */
     function isMenuVisible(menu) {
         return (
             menu.offsetParent !== null &&
@@ -24,68 +32,72 @@
         );
     }
 
-    // --- Confirmation using ST's native modal ---
+    // --- Confirmation Dialog ---
+
+    /**
+     * Show a confirmation modal using SillyTavern's native popup system.
+     * Falls back to browser confirm() if the API is unavailable.
+     */
     async function confirmWithModal(message) {
         const context = getContext();
-        if (context && typeof context.callGenericPopup === 'function') {
+        if (context?.callGenericPopup) {
             try {
                 const result = await context.callGenericPopup(message, 'confirm', null, {
                     okButton: 'Delete',
                     cancelButton: 'Cancel',
                 });
-                console.log('🔍 Popup result:', result);
-                // Affirmative: true, 1, "Delete", or "delete"
-                if (result === true || result === 1 || result === 'Delete' || (typeof result === 'string' && result.toLowerCase() === 'delete')) {
-                    return true;
-                }
-                return false;
-            } catch (e) {
-                console.error('Popup error, falling back to confirm:', e);
+                // ST's confirm popup returns 1 for "Delete", 0 for "Cancel"
+                return result === 1;
+            } catch {
+                // Fallback if the popup fails
                 return confirm(message);
             }
         }
         return confirm(message);
     }
 
-    // --- Core deletion logic ---
+    // --- Deletion Logic ---
+
+    /**
+     * Delete the clicked message and all messages after it.
+     * Uses ST's native deleteMessage API for each message.
+     */
     async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
-            console.error('❌ Context not found.');
+            console.error('[DeleteAfter] Context not found.');
             return;
         }
 
-        let chat = context.chat;
-        if (!chat && typeof context.getChat === 'function') chat = context.getChat();
+        const chat = context.chat ?? (typeof context.getChat === 'function' ? context.getChat() : null);
         if (!chat) {
-            console.error('❌ Chat array not found.');
+            console.error('[DeleteAfter] Chat array not found.');
             return;
         }
 
+        // Find the index of the message
         let index = chat.findIndex(msg => String(msg.id) === String(messageId));
         if (index === -1) {
             const idx = parseInt(messageId);
             if (!isNaN(idx) && idx >= 0 && idx < chat.length) index = idx;
         }
         if (index === -1) {
-            console.error(`❌ Message ID ${messageId} not found.`);
+            console.error(`[DeleteAfter] Message ID ${messageId} not found.`);
             return;
         }
 
+        // Build confirmation message
         const count = chat.length - index - 1;
-        let msg;
-        if (count === 0) {
-            msg = 'Are you sure you want to delete this message?';
-        } else {
-            msg = `Are you sure you want to delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`;
-        }
+        const msg = count === 0
+            ? 'Are you sure you want to delete this message?'
+            : `Are you sure you want to delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`;
+
         if (!(await confirmWithModal(msg))) return;
 
-        // Collect all mesid ≥ current from DOM
+        // Collect all mesid ≥ current from the DOM
         const currentIdNum = parseInt(messageId);
-        const allMes = document.querySelectorAll('.mes');
         const idsToDelete = [];
-        for (const mes of allMes) {
+        for (const mes of document.querySelectorAll('.mes')) {
             const mesId = mes.getAttribute('mesid');
             if (mesId !== null) {
                 const idNum = parseInt(mesId);
@@ -94,20 +106,21 @@
                 }
             }
         }
-        idsToDelete.sort((a, b) => b - a);
+        idsToDelete.sort((a, b) => b - a); // Delete from bottom up
 
         if (typeof context.deleteMessage !== 'function') {
-            console.error('❌ context.deleteMessage is not a function!');
+            console.error('[DeleteAfter] deleteMessage is not available.');
             return;
         }
 
+        // Perform deletions
         let deleted = 0;
         for (const mesId of idsToDelete) {
             try {
                 await context.deleteMessage(mesId);
                 deleted++;
             } catch (e) {
-                console.error(`❌ Error deleting message ${mesId}:`, e);
+                console.error(`[DeleteAfter] Failed to delete ${mesId}:`, e);
             }
         }
 
@@ -119,14 +132,21 @@
         refresh();
         setTimeout(refresh, 150);
 
+        // Toast notification
         if (typeof context.toast === 'function') {
             context.toast(`Deleted ${deleted} messages.`, 'info');
         }
     }
 
-    // --- Inject scissor icon ---
+    // --- UI Injection ---
+
+    /**
+     * Inject the scissor icon into the .extraMesButtons container
+     */
     function injectScissor(container, messageId) {
         if (!container) return;
+
+        // Remove any existing scissor (avoid duplicates)
         const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -147,23 +167,29 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
+            // Close the menu
             const mes = container.closest('.mes');
             if (mes) {
                 const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggle) toggle.click();
+                toggle?.click();
             }
         });
 
         container.appendChild(item);
     }
 
-    // --- One‑shot observer for menu visibility ---
+    // --- Visibility Observer ---
+
+    /**
+     * Wait for the menu to become visible, then inject the scissor.
+     * Uses a one-shot MutationObserver that self-destructs after injection.
+     */
     function waitForMenuAndInject(menu, messageId) {
         let observers = [];
 
         const cleanup = () => {
             for (const obs of observers) {
-                if (obs) obs.disconnect();
+                obs?.disconnect();
             }
             observers = [];
         };
@@ -177,12 +203,14 @@
             return false;
         };
 
+        // If already visible, inject immediately
         if (checkAndInject()) return;
 
+        // Observe the menu itself
         const menuObserver = new MutationObserver(() => {
             if (checkAndInject()) {
                 menuObserver.disconnect();
-                if (dropdownObserver) dropdownObserver.disconnect();
+                dropdownObserver?.disconnect();
             }
         });
         menuObserver.observe(menu, {
@@ -191,6 +219,7 @@
         });
         observers.push(menuObserver);
 
+        // Also observe the parent dropdown for class changes
         const dropdown = menu.closest('.dropdown');
         let dropdownObserver = null;
         if (dropdown) {
@@ -207,19 +236,20 @@
             observers.push(dropdownObserver);
         }
 
-        // Safety cleanup after 5s
-        setTimeout(() => {
-            for (const obs of observers) {
-                if (obs) obs.disconnect();
-            }
-            observers = [];
-        }, 5000);
+        // Safety: clean up after 5 seconds (prevents memory leaks)
+        setTimeout(cleanup, 5000);
     }
 
-    // --- Event delegation (single listener) ---
+    // --- Event Delegation ---
+
+    /**
+     * Set up a single click listener on #chat using event delegation.
+     * This handles all three-dots toggles without per-message listeners.
+     */
     function setupDelegation() {
         const container = document.querySelector('#chat');
         if (!container) return false;
+
         if (container.dataset.deleteAfterHereDelegated) return true;
         container.dataset.deleteAfterHereDelegated = 'true';
 
@@ -229,8 +259,10 @@
 
             const mes = toggle.closest('.mes');
             if (!mes) return;
+
             const id = getMessageId(mes);
             if (!id) return;
+
             const menu = mes.querySelector('.extraMesButtons');
             if (!menu) return;
 
@@ -240,13 +272,17 @@
         return true;
     }
 
-    // --- Scan for already‑open menus on load ---
+    // --- Scan Existing Menus ---
+
+    /**
+     * Check for any menus that are already open when the extension loads.
+     * This handles the case where a menu was open before the extension initialized.
+     */
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
 
-        const menus = container.querySelectorAll('.extraMesButtons');
-        for (const menu of menus) {
+        for (const menu of container.querySelectorAll('.extraMesButtons')) {
             if (isMenuVisible(menu)) {
                 const mes = menu.closest('.mes');
                 if (mes) {
@@ -259,6 +295,7 @@
     }
 
     // --- Initialisation ---
+
     let attempts = 0;
     let interval = null;
 
@@ -274,17 +311,17 @@
             } else if (attempts >= 30) {
                 clearInterval(interval);
                 interval = null;
-                console.error('❌ Failed to initialise.');
+                console.error('❌ Failed to initialise Delete After Here.');
             }
         }, 1000);
     }
+
+    // --- Start ---
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
         document.addEventListener('DOMContentLoaded', init);
     }
-    document.addEventListener('SillyTavernReady', () => {
-        setTimeout(init, 500);
-    });
+    document.addEventListener('SillyTavernReady', () => setTimeout(init, 500));
 })();
