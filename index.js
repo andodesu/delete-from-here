@@ -80,7 +80,7 @@
         }
     }
 
-    // --- Updated: scissor icon with matching size ---
+    // --- Updated: scissor icon with fine-tuned alignment ---
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu || menu.querySelector('.delete-after-here-item')) return false;
 
@@ -90,9 +90,11 @@
         item.title = 'Delete all after this message';
 
         const icon = document.createElement('i');
-        icon.className = 'fa-solid fa-scissors fa-fw'; // fa-fw for fixed width alignment
-        icon.style.fontSize = '0.9em'; // match typical icon size
-        icon.style.verticalAlign = 'middle';
+        icon.className = 'fa-solid fa-scissors fa-fw';
+        icon.style.fontSize = '0.9em';
+        // Nudge the icon up to align with other icons
+        icon.style.transform = 'translateY(-1px)';
+        icon.style.display = 'inline-block';
         item.appendChild(icon);
 
         item.addEventListener('click', (e) => {
