@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Ultimate loader started.');
+    console.log('🚀 Delete After Here: Enhanced loader started.');
 
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
@@ -21,7 +21,16 @@
             return;
         }
 
-        const index = chat.findIndex(msg => msg.id === messageId);
+        // Try to find by ID; if not, maybe we have index?
+        let index = chat.findIndex(msg => msg.id === messageId);
+        if (index === -1 && typeof messageId === 'number') {
+            // If messageId is a number, treat it as index (fallback)
+            index = messageId;
+            if (index < 0 || index >= chat.length) {
+                console.error(`❌ Invalid index ${index}.`);
+                return;
+            }
+        }
         if (index === -1) {
             console.error(`❌ Message ID ${messageId} not found in chat array.`);
             return;
@@ -44,7 +53,7 @@
 
     function addDeleteOptionToMenu(menu, messageId) {
         if (!menu) {
-            console.warn('⚠️ Menu element is null.');
+            console.warn('⚠️ Menu is null.');
             return false;
         }
         if (menu.querySelector('.delete-after-here-item')) {
@@ -67,14 +76,45 @@
         });
 
         menu.appendChild(item);
-        console.log(`✅ Option added for message ${messageId}`);
+        console.log(`✅ Option added for message with ID: ${messageId}`);
         return true;
     }
 
+    function getMessageId(messageElement) {
+        // Try multiple ways to get the message ID
+        // 1. data-message-id
+        let id = messageElement.dataset.messageId;
+        if (id !== undefined) return id;
+
+        // 2. data-id
+        id = messageElement.dataset.id;
+        if (id !== undefined) return id;
+
+        // 3. id attribute
+        if (messageElement.id) {
+            // Often it's like "mes_123"
+            const match = messageElement.id.match(/mes[_-]?(\d+)/i);
+            if (match) return match[1];
+            return messageElement.id;
+        }
+
+        // 4. Look for a child with data-message-id
+        const childWithId = messageElement.querySelector('[data-message-id]');
+        if (childWithId) return childWithId.dataset.messageId;
+
+        // 5. Look for a child with data-id
+        const childWithDataId = messageElement.querySelector('[data-id]');
+        if (childWithDataId) return childWithDataId.dataset.id;
+
+        // 6. If all fails, log the element and return null
+        console.warn('Could not extract message ID from element:', messageElement);
+        return null;
+    }
+
     function processMessage(messageElement) {
-        const messageId = messageElement.dataset.messageId;
+        const messageId = getMessageId(messageElement);
         if (!messageId) {
-            console.warn('⚠️ No data-message-id, skipping.');
+            console.warn('⚠️ Skipping message: no ID found.');
             return;
         }
 
@@ -96,10 +136,9 @@
 
         toggleBtn.addEventListener('click', function() {
             setTimeout(() => {
-                // Look for .mes_buttons inside the message
                 let menu = messageElement.querySelector('.mes_buttons');
                 if (!menu) {
-                    // Fallback: try to find any dropdown menu that appears
+                    // Try to find any visible mes_buttons
                     menu = document.querySelector('.mes_buttons:not(.delete-after-here-item)');
                 }
                 if (menu) {
@@ -110,11 +149,10 @@
             }, 200);
         });
 
-        console.log(`✅ Toggle hooked for message ${messageId}`);
+        console.log(`✅ Toggle hooked for message ID: ${messageId}`);
     }
 
     function scanAndProcess() {
-        // Try multiple container selectors
         const containers = ['#chat', '#messages', '.chat-container', '.message-container'];
         let chatContainer = null;
         for (const sel of containers) {
@@ -130,25 +168,28 @@
             return false;
         }
 
-        // Try multiple message selectors
         const selectors = ['.mes', '.message', '[data-message-id]', '.msg'];
         let found = false;
         for (const sel of selectors) {
             const msgs = chatContainer.querySelectorAll(sel);
             if (msgs.length > 0) {
                 console.log(`✅ Found ${msgs.length} messages using selector "${sel}"`);
+                // Log first message's outerHTML for debugging (only if more than 0)
+                if (msgs.length > 0) {
+                    console.log('🔍 Sample message HTML:', msgs[0].outerHTML.substring(0, 500));
+                }
                 msgs.forEach(processMessage);
                 found = true;
                 break;
             }
         }
         if (!found) {
-            console.warn('⚠️ No messages found. Here is the container HTML:');
+            console.warn('⚠️ No messages found. Container HTML preview:');
             console.log(chatContainer.innerHTML.substring(0, 800));
             return false;
         }
 
-        // MutationObserver to catch new messages
+        // MutationObserver
         const observer = new MutationObserver(() => {
             for (const sel of selectors) {
                 const msgs = chatContainer.querySelectorAll(sel);
@@ -158,7 +199,7 @@
                         processMessage(msg);
                     }
                 });
-                break; // Only need to run once per mutation
+                break;
             }
         });
         observer.observe(chatContainer, { childList: true, subtree: true });
@@ -166,7 +207,7 @@
         return true;
     }
 
-    // Aggressive retry: try every second for 30 seconds
+    // Retry mechanism
     let attempts = 0;
     const maxAttempts = 30;
     let intervalId = null;
@@ -181,7 +222,7 @@
                 clearInterval(intervalId);
                 intervalId = null;
             } else if (attempts >= maxAttempts) {
-                console.error(`❌ Failed to find messages after ${maxAttempts} attempts.`);
+                console.error(`❌ Failed after ${maxAttempts} attempts.`);
                 clearInterval(intervalId);
                 intervalId = null;
             } else {
@@ -190,14 +231,10 @@
         }, 1000);
     }
 
-    // Start when DOM is ready
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
         document.addEventListener('DOMContentLoaded', init);
     }
-    document.addEventListener('SillyTavernReady', () => {
-        // Restart the scan when ST signals it's ready
-        setTimeout(init, 500);
-    });
+    document.addEventListener('SillyTavernReady', () => setTimeout(init, 500));
 })();
