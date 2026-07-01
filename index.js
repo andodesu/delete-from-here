@@ -176,7 +176,7 @@
                 } else {
                     console.warn('⚠️ Menu not visible, skipping injection');
                 }
-            }, 125);
+            }, 150);
         });
 
         console.log('✅ Event delegation set up');
