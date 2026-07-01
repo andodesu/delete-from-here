@@ -1,22 +1,24 @@
 function deleteFromHere(messageId) {
-    if (messageId == null || messageId < 0) return;
+    const context = window.SillyTavernContext || window.getContext?.();
+    if (!context) return;
 
     if (!confirm("Delete this message and all following messages?")) return;
 
-    // ST global variables (important difference)
-    const chat = window.chat;
+    // ✅ OFFICIAL API PATH (preferred)
+    if (typeof context.deleteMessages === "function") {
+        context.deleteMessages(messageId);
+        return;
+    }
 
-    chat.splice(messageId);
-
-    if (window.saveChat) window.saveChat();
-    if (window.reloadCurrentChat) window.reloadCurrentChat();
+    // fallback for older builds
+    context.chat.splice(messageId);
+    context.saveChat?.();
+    context.reloadCurrentChat?.();
 }
 
 function injectButton(mes) {
     const buttons = mes.querySelector(".mes_buttons");
-    if (!buttons) return;
-
-    if (buttons.querySelector(".delete-from-here")) return;
+    if (!buttons || buttons.querySelector(".delete-from-here")) return;
 
     const btn = document.createElement("div");
     btn.className = "mes_button delete-from-here";
@@ -25,8 +27,7 @@ function injectButton(mes) {
 
     btn.onclick = (e) => {
         e.stopPropagation();
-        const id = Number(mes.dataset.messageid);
-        deleteFromHere(id);
+        deleteFromHere(Number(mes.dataset.messageid));
     };
 
     buttons.appendChild(btn);
@@ -36,11 +37,7 @@ function scan() {
     document.querySelectorAll(".mes").forEach(injectButton);
 }
 
-// Hook into ST events safely (if available)
-if (window.eventSource && window.event_types) {
-    window.eventSource.on(window.event_types.MESSAGE_RENDERED, scan);
-    window.eventSource.on(window.event_types.CHAT_CHANGED, scan);
-}
+window.eventSource?.on?.(window.event_types?.MESSAGE_RENDERED, scan);
+window.eventSource?.on?.(window.event_types?.CHAT_CHANGED, scan);
 
-// fallback (important for first render timing)
-setTimeout(scan, 1000);
+setTimeout(scan, 500);
