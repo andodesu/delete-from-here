@@ -1,12 +1,14 @@
 (function() {
     'use strict';
 
-    console.log('🚀 Delete After Here: Clean with show/hide events.');
+    console.log('🚀 Delete After Here: Event delegation (single listener).');
 
+    // --- Helper to get ST context ---
     function getContext() {
         return window.SillyTavern ? SillyTavern.getContext() : null;
     }
 
+    // --- Main deletion logic (unchanged, uses native deleteMessage) ---
     async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
@@ -34,6 +36,7 @@
         const count = chat.length - index - 1;
         if (!confirm(`Delete this message and ${count} message${count !== 1 ? 's' : ''} after it?`)) return;
 
+        // Collect mesid from DOM (reliable)
         const currentIdNum = parseInt(messageId);
         const allMes = document.querySelectorAll('.mes');
         const idsToDelete = [];
@@ -75,17 +78,20 @@
         }
     }
 
-    function addDeleteOptionToMenu(menu, messageId) {
-        if (!menu) return;
+    // --- Inject scissor icon into .extraMesButtons ---
+    function injectScissor(container, messageId) {
+        if (!container) return;
 
-        // Remove any existing item to avoid duplicates
-        const existing = menu.querySelector('.delete-after-here-item');
+        // Remove existing scissor if present (avoid duplicates)
+        const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
         const item = document.createElement('div');
         item.className = 'delete-after-here-item mes_button';
         item.style.cursor = 'pointer';
         item.title = 'Delete all after this message';
+        item.setAttribute('role', 'button');
+        item.setAttribute('tabindex', '0');
 
         const icon = document.createElement('i');
         icon.className = 'fa-solid fa-scissors fa-fw';
@@ -97,17 +103,18 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
-            // Close the dropdown
-            const mesElement = menu.closest('.mes');
-            if (mesElement) {
-                const toggleBtn = mesElement.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggleBtn) toggleBtn.click();
+            // Close the menu by clicking the three‑dots toggle
+            const mes = container.closest('.mes');
+            if (mes) {
+                const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
+                if (toggle) toggle.click();
             }
         });
 
-        menu.appendChild(item);
+        container.appendChild(item);
     }
 
+    // --- Helper to get message ID from .mes element ---
     function getMessageId(el) {
         const id = el.getAttribute('mesid');
         if (id !== null) return id;
@@ -116,73 +123,66 @@
         return el.id || null;
     }
 
-    function processMessage(el) {
-        const id = getMessageId(el);
-        if (!id) return;
-
-        const toggle = el.querySelector('.mes_button.extraMesButtonsHint');
-        if (!toggle) return;
-
-        // Find the dropdown container (the element with .dropdown class)
-        const dropdown = toggle.closest('.dropdown');
-        if (!dropdown) return;
-
-        // Avoid attaching duplicate event listeners
-        if (dropdown.dataset.deleteAfterHereProcessed === 'true') return;
-        dropdown.dataset.deleteAfterHereProcessed = 'true';
-
-        // When the dropdown opens, add our option
-        dropdown.addEventListener('shown.bs.dropdown', function() {
-            // Find the menu (could be .mes_buttons or .dropdown-menu)
-            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                addDeleteOptionToMenu(menu, id);
-            }
-        });
-
-        // When the dropdown closes, remove our option
-        dropdown.addEventListener('hidden.bs.dropdown', function() {
-            const menu = this.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                const item = menu.querySelector('.delete-after-here-item');
-                if (item) item.remove();
-            }
-        });
-
-        // If the dropdown is already open when the extension loads (rare), add now
-        if (dropdown.classList.contains('show')) {
-            const menu = dropdown.querySelector('.mes_buttons, .dropdown-menu');
-            if (menu) {
-                addDeleteOptionToMenu(menu, id);
-            }
-        }
-    }
-
-    function scan() {
+    // --- Set up event delegation on #chat (ONE listener) ---
+    function setupDelegation() {
         const container = document.querySelector('#chat');
         if (!container) return false;
 
-        const msgs = container.querySelectorAll('.mes');
-        if (!msgs.length) return false;
+        // Only attach once
+        if (container.dataset.deleteAfterHereDelegated) return true;
+        container.dataset.deleteAfterHereDelegated = 'true';
 
-        msgs.forEach(processMessage);
+        // One listener for all three‑dots clicks
+        container.addEventListener('click', function(e) {
+            // Find if the click was on or inside a .mes_button.extraMesButtonsHint
+            const toggle = e.target.closest('.mes_button.extraMesButtonsHint');
+            if (!toggle) return;
 
-        new MutationObserver(() => {
-            container.querySelectorAll('.mes').forEach(el => {
-                const toggle = el.querySelector('.mes_button.extraMesButtonsHint');
-                if (toggle && !toggle.dataset.deleteAfterHereHook) processMessage(el);
-            });
-        }).observe(container, { childList: true, subtree: true });
+            const mes = toggle.closest('.mes');
+            if (!mes) return;
+            const id = getMessageId(mes);
+            if (!id) return;
+            const menu = mes.querySelector('.extraMesButtons');
+            if (!menu) return;
+
+            // Wait a tiny bit for the menu to become visible (style change)
+            setTimeout(() => {
+                // Check if menu is actually visible (offsetParent is non-null)
+                if (menu.offsetParent !== null) {
+                    injectScissor(menu, id);
+                }
+            }, 50);
+        });
 
         return true;
     }
 
+    // --- Check for any already‑open menus on load ---
+    function scanExisting() {
+        const container = document.querySelector('#chat');
+        if (!container) return false;
+
+        container.querySelectorAll('.extraMesButtons').forEach(menu => {
+            // If the menu is visible (offsetParent !== null)
+            if (menu.offsetParent !== null) {
+                const mes = menu.closest('.mes');
+                if (mes) {
+                    const id = getMessageId(mes);
+                    if (id) injectScissor(menu, id);
+                }
+            }
+        });
+        return true;
+    }
+
+    // --- Retry initialisation until #chat is available ---
     let attempts = 0, interval;
     function init() {
         if (interval) clearInterval(interval);
         interval = setInterval(() => {
             attempts++;
-            if (scan()) {
+            const ok = setupDelegation() && scanExisting();
+            if (ok) {
                 clearInterval(interval);
                 interval = null;
                 console.log('✅ Delete After Here ready.');
@@ -194,6 +194,7 @@
         }, 1000);
     }
 
+    // --- Start when DOM is ready ---
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
     } else {
