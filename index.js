@@ -9,18 +9,26 @@
 
     // --- Helpers ---
 
+    /** Get SillyTavern's extension context */
     function getContext() {
         return window.SillyTavern?.getContext() || null;
     }
 
-    function getMessageId(el) {
-        return el.getAttribute('mesid')
+    /**
+     * Read the message index from a .mes element.
+     * ST exposes this as the `mesid` attribute, which equals the
+     * message's position in the chat array.
+     */
+    function getMesIndex(el) {
+        const raw = el.getAttribute('mesid')
             || el.dataset.messageId
             || el.dataset.id
             || el.id
             || null;
+        return raw === null ? null : String(raw);
     }
 
+    /** Check if a menu element is currently visible */
     function isMenuVisible(menu) {
         return (
             menu.offsetParent !== null &&
@@ -31,6 +39,10 @@
 
     // --- Confirmation Dialog ---
 
+    /**
+     * Show a confirmation modal using SillyTavern's native popup system.
+     * Falls back to browser confirm() if the API is unavailable.
+     */
     async function confirmWithModal(message) {
         const context = getContext();
         if (context?.callGenericPopup) {
@@ -39,6 +51,7 @@
                     okButton: 'Delete',
                     cancelButton: 'Cancel',
                 });
+                // ST's confirm popup returns 1 for "Delete", 0 for "Cancel"
                 return result === 1;
             } catch {
                 return confirm(message);
@@ -49,7 +62,11 @@
 
     // --- Deletion Logic ---
 
-    async function deleteAfter(messageId) {
+    /**
+     * Delete the message at `mesIndex` and all messages after it.
+     * Uses ST's native deleteMessage API for each message.
+     */
+    async function deleteAfter(mesIndex) {
         const context = getContext();
         if (!context) {
             console.error('[DeleteAfter] Context not found.');
@@ -62,9 +79,12 @@
             return;
         }
 
-        const index = chat.findIndex(msg => String(msg.id) === String(messageId));
-        if (index === -1) {
-            console.error(`[DeleteAfter] Message ID ${messageId} not found.`);
+        // ST's chat array objects have no `id` property. The "message ID"
+        // exposed in the DOM as the `mesid` attribute is actually the array
+        // index. So we parse it directly — no need to search for a match.
+        const index = parseInt(mesIndex);
+        if (isNaN(index) || index < 0 || index >= chat.length) {
+            console.error(`[DeleteAfter] Message index ${mesIndex} is out of range.`);
             return;
         }
 
@@ -80,18 +100,22 @@
             return;
         }
 
-        const targetMesId = parseInt(messageId);
+        const targetIndex = index;
         const maxIterations = 1000;
         let deleted = 0;
         let iteration = 0;
 
         while (iteration++ < maxIterations) {
+            // Re-scan the DOM for the highest remaining mesid >= target.
+            // ST's deleteMessage renumbers mesids after each deletion
+            // (via updateViewMessageIds), so we must re-read them instead
+            // of using a stale snapshot from before the loop.
             let highest = -1;
             for (const mes of document.querySelectorAll('.mes')) {
                 const idStr = mes.getAttribute('mesid');
                 if (idStr === null) continue;
                 const idNum = parseInt(idStr);
-                if (!isNaN(idNum) && idNum >= targetMesId && idNum > highest) {
+                if (!isNaN(idNum) && idNum >= targetIndex && idNum > highest) {
                     highest = idNum;
                 }
             }
@@ -103,15 +127,17 @@
             try {
                 await context.deleteMessage(highest);
             } catch (e) {
-                console.error(`[DeleteAfter] Failed to delete ${highest}:`, e);
+                console.error(`[DeleteAfter] Failed to delete message at index ${highest}:`, e);
                 break;
             }
 
             const afterCount = document.querySelectorAll('.mes').length;
 
+            // Guard against deleteMessage silently no-op'ing (e.g. it can't
+            // find the element) — without this, the loop could spin forever.
             if (afterCount >= beforeCount) {
                 console.warn(
-                    `[DeleteAfter] Deletion of mesid ${highest} did not reduce message count. Aborting.`
+                    `[DeleteAfter] Deletion at index ${highest} did not reduce message count. Aborting.`
                 );
                 break;
             }
@@ -133,7 +159,10 @@
 
     // --- UI Injection ---
 
-    function injectScissor(container, messageId) {
+    /**
+     * Inject the scissor icon into the .extraMesButtons container.
+     */
+    function injectScissor(container, mesIndex) {
         if (!container) return;
 
         const existing = container.querySelector('.delete-after-here-item');
@@ -155,7 +184,7 @@
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
-            deleteAfter(messageId);
+            deleteAfter(mesIndex);
             const mes = container.closest('.mes');
             if (mes) {
                 const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
@@ -168,7 +197,11 @@
 
     // --- Visibility Observer ---
 
-    function waitForMenuAndInject(menu, messageId) {
+    /**
+     * Wait for the menu to become visible, then inject the scissor.
+     * Uses a one-shot MutationObserver that self-destructs after injection.
+     */
+    function waitForMenuAndInject(menu, mesIndex) {
         let observers = [];
 
         const cleanup = () => {
@@ -178,7 +211,7 @@
 
         const checkAndInject = () => {
             if (isMenuVisible(menu)) {
-                injectScissor(menu, messageId);
+                injectScissor(menu, mesIndex);
                 cleanup();
                 return true;
             }
@@ -220,6 +253,9 @@
 
     // --- Event Delegation ---
 
+    /**
+     * Set up a single click listener on #chat using event delegation.
+     */
     function setupDelegation() {
         const container = document.querySelector('#chat');
         if (!container) return false;
@@ -234,13 +270,13 @@
             const mes = toggle.closest('.mes');
             if (!mes) return;
 
-            const id = getMessageId(mes);
-            if (!id) return;
+            const mesIndex = getMesIndex(mes);
+            if (mesIndex === null) return;
 
             const menu = mes.querySelector('.extraMesButtons');
             if (!menu) return;
 
-            waitForMenuAndInject(menu, id);
+            waitForMenuAndInject(menu, mesIndex);
         });
 
         return true;
@@ -248,6 +284,9 @@
 
     // --- Scan Existing Menus ---
 
+    /**
+     * Inject the scissor into any menus that are already open on load.
+     */
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
@@ -256,8 +295,8 @@
             if (isMenuVisible(menu)) {
                 const mes = menu.closest('.mes');
                 if (mes) {
-                    const id = getMessageId(mes);
-                    if (id) injectScissor(menu, id);
+                    const mesIndex = getMesIndex(mes);
+                    if (mesIndex !== null) injectScissor(menu, mesIndex);
                 }
             }
         }
