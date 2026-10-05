@@ -9,12 +9,10 @@
 
     // --- Helpers ---
 
-    /** Get SillyTavern's extension context */
     function getContext() {
         return window.SillyTavern?.getContext() || null;
     }
 
-    /** Extract message ID from a .mes element */
     function getMessageId(el) {
         return el.getAttribute('mesid')
             || el.dataset.messageId
@@ -23,7 +21,6 @@
             || null;
     }
 
-    /** Check if a menu element is currently visible */
     function isMenuVisible(menu) {
         return (
             menu.offsetParent !== null &&
@@ -34,10 +31,6 @@
 
     // --- Confirmation Dialog ---
 
-    /**
-     * Show a confirmation modal using SillyTavern's native popup system.
-     * Falls back to browser confirm() if the API is unavailable.
-     */
     async function confirmWithModal(message) {
         const context = getContext();
         if (context?.callGenericPopup) {
@@ -46,10 +39,8 @@
                     okButton: 'Delete',
                     cancelButton: 'Cancel',
                 });
-                // ST's confirm popup returns 1 for "Delete", 0 for "Cancel"
                 return result === 1;
             } catch {
-                // Fallback if the popup fails
                 return confirm(message);
             }
         }
@@ -58,10 +49,6 @@
 
     // --- Deletion Logic ---
 
-    /**
-     * Delete the clicked message and all messages after it.
-     * Uses ST's native deleteMessage API for each message.
-     */
     async function deleteAfter(messageId) {
         const context = getContext();
         if (!context) {
@@ -75,18 +62,12 @@
             return;
         }
 
-        // Find the index of the message
-        let index = chat.findIndex(msg => String(msg.id) === String(messageId));
-        if (index === -1) {
-            const idx = parseInt(messageId);
-            if (!isNaN(idx) && idx >= 0 && idx < chat.length) index = idx;
-        }
+        const index = chat.findIndex(msg => String(msg.id) === String(messageId));
         if (index === -1) {
             console.error(`[DeleteAfter] Message ID ${messageId} not found.`);
             return;
         }
 
-        // Build confirmation message
         const count = chat.length - index - 1;
         const msg = count === 0
             ? 'Are you sure you want to delete this message?'
@@ -94,37 +75,50 @@
 
         if (!(await confirmWithModal(msg))) return;
 
-        // Collect all mesid ≥ current from the DOM
-        const currentIdNum = parseInt(messageId);
-        const idsToDelete = [];
-        for (const mes of document.querySelectorAll('.mes')) {
-            const mesId = mes.getAttribute('mesid');
-            if (mesId !== null) {
-                const idNum = parseInt(mesId);
-                if (!isNaN(idNum) && idNum >= currentIdNum) {
-                    idsToDelete.push(idNum);
-                }
-            }
-        }
-        idsToDelete.sort((a, b) => b - a); // Delete from bottom up
-
         if (typeof context.deleteMessage !== 'function') {
             console.error('[DeleteAfter] deleteMessage is not available.');
             return;
         }
 
-        // Perform deletions
+        const targetMesId = parseInt(messageId);
+        const maxIterations = 1000;
         let deleted = 0;
-        for (const mesId of idsToDelete) {
-            try {
-                await context.deleteMessage(mesId);
-                deleted++;
-            } catch (e) {
-                console.error(`[DeleteAfter] Failed to delete ${mesId}:`, e);
+        let iteration = 0;
+
+        while (iteration++ < maxIterations) {
+            let highest = -1;
+            for (const mes of document.querySelectorAll('.mes')) {
+                const idStr = mes.getAttribute('mesid');
+                if (idStr === null) continue;
+                const idNum = parseInt(idStr);
+                if (!isNaN(idNum) && idNum >= targetMesId && idNum > highest) {
+                    highest = idNum;
+                }
             }
+
+            if (highest === -1) break;
+
+            const beforeCount = document.querySelectorAll('.mes').length;
+
+            try {
+                await context.deleteMessage(highest);
+            } catch (e) {
+                console.error(`[DeleteAfter] Failed to delete ${highest}:`, e);
+                break;
+            }
+
+            const afterCount = document.querySelectorAll('.mes').length;
+
+            if (afterCount >= beforeCount) {
+                console.warn(
+                    `[DeleteAfter] Deletion of mesid ${highest} did not reduce message count. Aborting.`
+                );
+                break;
+            }
+
+            deleted++;
         }
 
-        // Refresh UI
         const refresh = () => {
             if (typeof context.refreshMessages === 'function') context.refreshMessages();
             else if (typeof context.loadChat === 'function') context.loadChat();
@@ -132,21 +126,16 @@
         refresh();
         setTimeout(refresh, 150);
 
-        // Toast notification
         if (typeof context.toast === 'function') {
-            context.toast(`Deleted ${deleted} messages.`, 'info');
+            context.toast(`Deleted ${deleted} message${deleted !== 1 ? 's' : ''}.`, 'info');
         }
     }
 
     // --- UI Injection ---
 
-    /**
-     * Inject the scissor icon into the .extraMesButtons container
-     */
     function injectScissor(container, messageId) {
         if (!container) return;
 
-        // Remove any existing scissor (avoid duplicates)
         const existing = container.querySelector('.delete-after-here-item');
         if (existing) existing.remove();
 
@@ -167,7 +156,6 @@
         item.addEventListener('click', (e) => {
             e.stopPropagation();
             deleteAfter(messageId);
-            // Close the menu
             const mes = container.closest('.mes');
             if (mes) {
                 const toggle = mes.querySelector('.mes_button.extraMesButtonsHint');
@@ -180,17 +168,11 @@
 
     // --- Visibility Observer ---
 
-    /**
-     * Wait for the menu to become visible, then inject the scissor.
-     * Uses a one-shot MutationObserver that self-destructs after injection.
-     */
     function waitForMenuAndInject(menu, messageId) {
         let observers = [];
 
         const cleanup = () => {
-            for (const obs of observers) {
-                obs?.disconnect();
-            }
+            for (const obs of observers) obs?.disconnect();
             observers = [];
         };
 
@@ -203,10 +185,8 @@
             return false;
         };
 
-        // If already visible, inject immediately
         if (checkAndInject()) return;
 
-        // Observe the menu itself
         const menuObserver = new MutationObserver(() => {
             if (checkAndInject()) {
                 menuObserver.disconnect();
@@ -219,7 +199,6 @@
         });
         observers.push(menuObserver);
 
-        // Also observe the parent dropdown for class changes
         const dropdown = menu.closest('.dropdown');
         let dropdownObserver = null;
         if (dropdown) {
@@ -236,16 +215,11 @@
             observers.push(dropdownObserver);
         }
 
-        // Safety: clean up after 5 seconds (prevents memory leaks)
         setTimeout(cleanup, 5000);
     }
 
     // --- Event Delegation ---
 
-    /**
-     * Set up a single click listener on #chat using event delegation.
-     * This handles all three-dots toggles without per-message listeners.
-     */
     function setupDelegation() {
         const container = document.querySelector('#chat');
         if (!container) return false;
@@ -274,10 +248,6 @@
 
     // --- Scan Existing Menus ---
 
-    /**
-     * Check for any menus that are already open when the extension loads.
-     * This handles the case where a menu was open before the extension initialized.
-     */
     function scanExisting() {
         const container = document.querySelector('#chat');
         if (!container) return false;
@@ -315,8 +285,6 @@
             }
         }, 1000);
     }
-
-    // --- Start ---
 
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
         init();
